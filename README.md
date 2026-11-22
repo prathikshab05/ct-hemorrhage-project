@@ -1,5 +1,50 @@
 # CT Hemorrhage Classification — Starter
 
+## Open CT Slice Lab
+
+From the project folder in the VS Code PowerShell terminal:
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run src\viewer_app.py
+```
+
+The browser opens to a synthetic slice. Change the window preset, toggle the
+amber highlight, and adjust its opacity. Select **Research DICOM** to view one
+local research slice. You can upload a corresponding two-dimensional binary
+NumPy mask and export the displayed overlay as a PNG. Mask validation checks
+pixel dimensions and binary values. Verify slice identity and orientation
+before interpreting overlays.
+
+The viewer blends a pixel-aligned mask over the slice. A future segmentation
+model or an annotated mask can supply those pixels. The RSNA classification
+labels describe hemorrhage presence and subtypes, so precise overlays need
+additional localization evidence. The initial viewer handles one slice.
+
+## Dataset and evaluation plan
+
+| Source | Role | Current status |
+| --- | --- | --- |
+| [RSNA head CT challenge](https://registry.opendata.aws/rsna-intracranial-hemorrhage-detection/) | Primary detection and subtype cohort, over 25,000 exams | Data acquisition pending |
+| [PhysioNet CT-ICH](https://physionet.org/content/ct-ich/1.0.0/) | Separate source of trauma head CTs and hemorrhage annotations, 82 scans | Volume and mask conversion pending |
+
+Keep raw scans and annotations locally under the ignored `data/` directory.
+Split by patient before model development, choose thresholds on validation data,
+and keep external exams separate from training and threshold selection. Map
+labels across sources before comparing results and report each cohort separately.
+
+For a held-out CSV with `exam_id,label,probability` columns, run the evaluator
+once per target and cohort. For example, with a threshold of 0.5 chosen on
+validation data:
+
+```powershell
+.\.venv\Scripts\python.exe src\evaluate.py predictions.csv --threshold 0.5
+```
+
+The evaluator reports AUROC, average precision, sensitivity, specificity, and
+error counts at exam level. Future segmentation evaluation should also report
+Dice overlap against annotated masks. Model training and performance results
+are pending. The viewer is a research prototype.
+
 An educational computer-vision project for detecting intracranial hemorrhage and classifying the five RSNA hemorrhage subtypes from non-contrast head CT images.
 
 **Scope:** this project is a research prototype. The RSNA labels support hemorrhage detection and subtype classification. They do not label surgical urgency, and the app must not make treatment decisions.
