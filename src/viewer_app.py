@@ -391,7 +391,7 @@ def volume_prediction():
         rendered = render_slice(section, center, width, mask=overlay, opacity=opacity)
         height, columns = section.shape
         x_axis, y_axis = ((1, 2), (0, 2), (0, 1))[axis]
-        ratio = columns * spacing[x_axis] / (height * spacing[y_axis])
+        ratio = columns * spacing[x_axis] / (height * spacing[y_axis]) if spacing[y_axis] > 0 else None
         preview.image(viewer_image(rendered, ratio), width="stretch")
         if overlay is not None:
             st.caption(f"Cyan shows the model output · {np.count_nonzero(overlay):,} marked pixels on this slice.")
@@ -421,7 +421,7 @@ def viewer_slice_index(plane, count, initial, fingerprint):
     if count == 1:
         return 0
     key = f"viewer-index-{fingerprint}-{plane}"
-    current = st.session_state.get(key, initial + 1)
+    current = st.session_state.setdefault(key, initial + 1)
     previous, step, following = st.columns([1, 5, 1])
     with previous:
         st.button("Previous", key=f"{key}-prev", disabled=current <= 1,
@@ -429,7 +429,7 @@ def viewer_slice_index(plane, count, initial, fingerprint):
     with following:
         st.button("Next", key=f"{key}-next", disabled=current >= count,
                   on_click=st.session_state.update, args=({key: current + 1},))
-    return step.slider(f"{plane} slice", 1, count, initial + 1, key=key) - 1
+    return step.slider(f"{plane} slice", 1, count, key=key) - 1
 
 
 def volume_section(volume, axis, index):
@@ -493,6 +493,7 @@ def upload_scan():
         volume = None
     if volume is not None:
         st.session_state.pop("analysis_scan", None)
+        st.session_state.pop("volume_prediction", None)
         st.session_state["analysis_volume"] = (volume.name, volume.getvalue())
         st.session_state["analysis_source"] = "volume-prediction"
         st.switch_page(analysis_page)
@@ -564,8 +565,9 @@ def home():
         st.markdown("[Image source](https://commons.wikimedia.org/wiki/File:Intracerebral_hemorrhage.jpg) · [License](https://creativecommons.org/licenses/by/2.0/)")
 
 def analysis():
-    view_route = st.session_state.get("analysis_source", "slice")
     from title_page import workspace_entry
+
+    view_route = st.session_state.get("analysis_source", "slice")
 
     if view_route in ("review", "volume"):
         from dashboard import dashboard_header, scan_workspace_style
@@ -670,16 +672,7 @@ def analysis():
             except (ImportError, OSError, ValueError, RuntimeError, KeyError) as error:
                 st.error(f"Classifier unavailable. {error}")
         if scores is not None:
-            score = float(scores["any"])
-            st.markdown(
-                f'<div style="margin:18px auto;width:112px;height:112px;border-radius:50%;'
-                f'background:conic-gradient(#68e8ff {score * 360:.1f}deg,#263b49 0);'
-                'display:grid;place-items:center"><b style="background:#0b1a26;'
-                'border-radius:50%;width:94px;height:94px;display:grid;place-items:center;'
-                f'font-size:1.45rem">{score:.3f}</b></div>',
-                unsafe_allow_html=True,
-            )
-            st.caption("Any hemorrhage · raw score")
+            st.metric("Any hemorrhage · raw score", f"{float(scores['any']):.3f}")
             st.markdown("**Subtype scores**")
             for label, value in scores.items():
                 if label != "any":
