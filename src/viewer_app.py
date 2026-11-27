@@ -364,6 +364,21 @@ def upload_scan():
     if "active_scan" not in st.session_state:
         st.caption("Upload a scan to unlock the Scan Viewer and Model Results.")
 
+    with st.container(key="ct-upload-teaching"):
+        st.subheader("No scan on hand?")
+        st.caption("Explore a published CT example without uploading a file.")
+        with st.expander("Open teaching scan"):
+            asset = Path(__file__).resolve().parents[1] / "assets" / "ct-seg-cq500-preview.webp"
+            st.image(str(asset), caption="Axial, coronal, and sagittal views of one Seg-CQ500 case.")
+            st.caption(
+                "Salmon shows the reference hemorrhage annotation. Blue shows the cavity outline "
+                "from the source paper’s U-Net. This is a static teaching example."
+            )
+            st.markdown(
+                "[Spahr et al. (2023), Fig. 1B](https://doi.org/10.3389/fnimg.2023.1157565) · "
+                "[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)"
+            )
+
     st.html("""
         <p class="ct-upload-foot">
             Use de-identified research scans only. The hosted app processes uploads on its server.
