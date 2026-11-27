@@ -9,5 +9,7 @@ models/
 outputs/
 kaggle.json
 *.pt
+!assets/checkpoints/ct-segmenter-balanced-expanded.pt
+!assets/checkpoints/ct-expanded-spatial.pt
 *.pth
 *.ckpt

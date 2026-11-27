@@ -1,6 +1,33 @@
 # CT Hemorrhage Classification — Starter
 
+## Run the website
+
+On Windows, double-click **run-viewer.cmd** and keep its window open. Visit
+[CT Slice Lab](http://127.0.0.1:8503/). Run `setup.cmd` first if the virtual
+environment is missing.
+
+## Deploy to Streamlit Community Cloud
+
+Set the branch to `main`, main file path to `src/viewer_app.py`, and Python
+to 3.12. The hosted requirements install CPU PyTorch and the viewer uses the
+bundled research weights. Example CT volumes and reference masks live in the
+ignored `data/` folder. The hosted viewer can run inference on a de-identified
+research upload and display the published teaching image.
+
 ## Open CT Slice Lab
+
+### Run the Kaggle classifier locally
+
+Download `ct-spatial-cnn.pt` from the private Kaggle notebook's Output
+panel and place it at `models/ct-spatial-cnn.pt`. The model folder and
+research data are ignored by Git. Run the app with the command below,
+choose **Research DICOM** and upload one authorized research CT slice.
+The app opens the separate **Scan analysis** page automatically.
+Click **Run research classifier** there. The app displays six uncalibrated
+slice scores. Annotation overlays are shown separately.
+
+The checkpoint uses the small spatial CNN from the notebook. The separate
+ResNet training script produces a different checkpoint format.
 
 From the project folder in the VS Code PowerShell terminal:
 
@@ -8,8 +35,22 @@ From the project folder in the VS Code PowerShell terminal:
 .\.venv\Scripts\python.exe -m streamlit run src\viewer_app.py
 ```
 
-The browser opens to a synthetic slice. Change the window preset, toggle the
-amber highlight, and adjust its opacity. Select **Research DICOM** to view one
+The browser opens to **Sample CT**, using the example bundled with pydicom
+or the copy under `data/`.
+For real scans, switch to **Annotated research case**. Install the updated packages
+with `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`.
+At [PhysioNet CT-ICH v1.3.1](https://physionet.org/content/ct-ich/1.3.1/),
+sign in and review the data use agreement. Choose a hemorrhage-positive case
+from the labels table and download the scan and mask with the same case ID.
+You can select both files directly in the viewer. To preload a case on startup, place the files in `data/annotated_case/` as `scan.nii.gz` and `mask.nii.gz`.
+If a file ends in `.nii`, gzip-compress it before using the `.nii.gz` extension.
+Open **Annotated research case**. Pick a plane and scroll with its slice
+slider. Turn on **Show neighboring slices** for up to four views at once.
+Turn that grid off for side-by-side comparison. Toggle
+**Show supplied mask** to compare the raw CT with the annotated region.
+The viewer starts on the slice with the most marked pixels.
+
+Select **Research DICOM** to view one
 local research slice. You can upload a corresponding two-dimensional binary
 NumPy mask and export the displayed overlay as a PNG. Mask validation checks
 pixel dimensions and binary values. Verify slice identity and orientation
@@ -22,10 +63,127 @@ additional localization evidence. The initial viewer handles one slice.
 
 ## Dataset and evaluation plan
 
+### Train a segmentation baseline
+
+Use paired research CT volumes and binary masks in NIfTI format. Put a
+local CSV in `data/` with columns `patient_id,scan,mask`; paths are relative
+to the CSV. Use the same patient ID for every scan from a patient.
+
+```powershell
+.\.venv\Scripts\python.exe src\train_segmentation.py data\segmentation.csv
+```
+
+The experimental trainer keeps each patient group in one split and samples
+slices with and without annotated pixels at equal expected rates. It chooses
+the score threshold using Dice on positive validation volumes at 128x128 and
+reports how many negative volumes contain predicted pixels. Keep a separate
+patient test manifest out of training and threshold selection, then measure
+overlap on the original scan grid:
+
+```powershell
+.\.venv\Scripts\python.exe src\evaluate_segmentation.py data\segmentation-test.csv --checkpoint models\ct-segmenter.pt
+```
+
+To export an experimental prediction from a
+trained checkpoint and open it as a supplied mask in the volume viewer:
+
+```powershell
+.\.venv\Scripts\python.exe src\predict_segmentation.py data\scan.nii.gz outputs\predicted-mask.nii.gz
+```
+
+The exported mask uses the original scan's dimensions and spatial grid.
+
+### BHSD segmentation experiment
+
+The [BHSD labeled archive](https://huggingface.co/datasets/Wendy-Fly/BHSD)
+supplied 40 paired scans and reference masks. The expanded experiment used
+25 scans for training, 7 for threshold selection, and 8 for testing. All
+subtypes were merged into a single foreground mask. Splits used archive
+identifiers. Separate patient identities could not be verified.
+
+| Run | Training scans | Mean native-grid Dice on the same 8 held-out scans |
+| --- | ---: | ---: |
+| Original pilot | 8 | 0.000 |
+| Balanced pilot | 8 | 0.179 |
+| Balanced expanded, single slice | 25 | 0.354 |
+| Balanced expanded, neighboring slices | 25 | 0.359 |
+
+Expanded test Dice ranged from 0.002 to 0.790. Mean voxel precision was
+0.409 and mean voxel recall was 0.394 across the eight scans. Every test
+scan had annotated hemorrhage, so this experiment cannot estimate
+false positives on scans without hemorrhage. The neighboring-slice run used
+the same partition and eight training epochs. Its mean voxel precision was
+0.413 and mean voxel recall was 0.354. The small Dice gain and lower recall
+do not establish an improvement on this test set. The demo uses the
+single-slice checkpoint.
+
+### Generate an overlay on a research volume
+
+From the dashboard, select **Predict on a CT volume**. Upload a de-identified
+3D head CT in NIfTI format (`.nii` or `.nii.gz`), or select the local
+BHSD example. Click **Generate experimental overlay**. The orange mask shows
+the experimental single-slice model's output on the scan, with synchronized
+slice navigation and opacity controls. It does not require a reference mask.
+The viewer looks for `ct-segmenter-balanced-expanded.pt` in `models/` and then `assets/checkpoints/`. Use **Review
+model results** to compare that model with published annotations.
+
+### Review model overlays
+
+Choose **Review model results** from the dashboard to compare the original CT,
+the reference annotation, and the experimental model mask on the same slice.
+The two BHSD examples were selected to show strong overlap and a missed region.
+For a local checkout, each case needs a `scan.nii.gz`, `mask.nii.gz`, and
+`prediction.nii.gz` under `data/model-review/strong/` or
+`data/model-review/failure/`. Generate the prediction with
+`src/predict_segmentation.py` and the intended checkpoint.
+
+To test the neighboring-slice variant, add `--neighboring-slices` to the
+training command. The model uses three adjacent axial slices to predict the
+center slice. The first and last slices repeat the edge input as needed.
+The same evaluator and export commands accept either checkpoint.
+
+### Train the six-output CNN on an RSNA subset
+
+Put the RSNA label CSV and a small set of labeled DICOM slices under the
+ignored `data/` folder. Keep enough distinct patients and positive examples
+for validation. The folder below should directly contain the selected slices.
+From the project root, with PyTorch and TorchVision installed:
+
+```powershell
+.\.venv\Scripts\python.exe src\train_cnn.py data\stage_2_train.csv data\rsna_subset --epochs 2
+```
+
+The script groups slices by DICOM PatientID, uses three contrast windows,
+and prints validation log loss and AUROC per output. AUROC is undefined
+when a validation label contains just one class. The first run may need
+network access for the pretrained weights. The checkpoint is written to
+`outputs/rsna_resnet50.pt`. These outputs are slice classification scores.
+Pixel overlays come from the supplied annotation.
+
+### Train the first baseline from local files
+
+`src/train_baseline.py` is a binary research baseline. It learns from
+histograms of CT slice intensities, then uses the highest slice score per
+exam for ranking. This score has not been calibrated as an exam probability.
+The model does not produce a localization mask.
+
+Create `data/manifest.csv` with columns `path,patient_id,exam_id,label,split`.
+Use one row per DICOM slice, paths relative to the manifest, binary slice
+labels, and explicit `train` or `test` values. Assign each patient to just
+one split. Keep the manifest with the local data.
+
+```powershell
+.\.venv\Scripts\python.exe src\train_baseline.py data\manifest.csv outputs\predictions.csv
+```
+
+This reports ranking metrics for held-out exams and saves their scores.
+Choose any threshold for sensitivity and specificity on separate validation
+data before applying it to the held-out predictions.
+
 | Source | Role | Current status |
 | --- | --- | --- |
 | [RSNA head CT challenge](https://registry.opendata.aws/rsna-intracranial-hemorrhage-detection/) | Primary detection and subtype cohort, over 25,000 exams | Data acquisition pending |
-| [PhysioNet CT-ICH](https://physionet.org/content/ct-ich/1.0.0/) | Separate source of trauma head CTs and hemorrhage annotations, 82 scans | Volume and mask conversion pending |
+| [PhysioNet CT-ICH v1.3.1](https://physionet.org/content/ct-ich/1.3.1/) | Independent cohort with and without hemorrhage, 75 released NIfTI scans | PhysioNet registration and signed data use agreement required |
 
 Keep raw scans and annotations locally under the ignored `data/` directory.
 Split by patient before model development, choose thresholds on validation data,
@@ -41,9 +199,8 @@ validation data:
 ```
 
 The evaluator reports AUROC, average precision, sensitivity, specificity, and
-error counts at exam level. Future segmentation evaluation should also report
-Dice overlap against annotated masks. Model training and performance results
-are pending. The viewer is a research prototype.
+error counts at exam level. The segmentation evaluator reports voxel overlap
+against annotated masks on the original CT grid. The viewer is a research prototype.
 
 An educational computer-vision project for detecting intracranial hemorrhage and classifying the five RSNA hemorrhage subtypes from non-contrast head CT images.
 
