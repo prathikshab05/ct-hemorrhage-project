@@ -239,63 +239,112 @@ def read_review_case(scan_path, mask_path, prediction_path, modified):
 
 
 def model_review():
-    st.subheader("Model review")
-    st.caption(
-        "Two selected BHSD test cases. Cyan shows the reference annotation. "
-        "Orange shows the experimental single-slice model output."
-    )
-    case = st.segmented_control(
-        "Review case", ["Strong overlap", "Missed region"], default="Strong overlap",
-    ) or "Strong overlap"
-    case_key = "strong" if case == "Strong overlap" else "failure"
-    folder = Path(__file__).resolve().parents[1] / "data" / "model-review" / case_key
-    paths = [folder / name for name in ("scan.nii.gz", "mask.nii.gz", "prediction.nii.gz")]
-    if not all(path.is_file() for path in paths):
-        st.info("This review case needs a local scan, reference mask, and saved model prediction.")
-        return
-    try:
-        from nibabel.filebasedimages import ImageFileError
-        from nibabel.spatialimages import HeaderDataError
-    except ModuleNotFoundError:
-        st.info("Install nibabel to open the review cases.")
-        return
-    try:
-        values, reference, prediction = read_review_case(
-            *(str(path) for path in paths), tuple(path.stat().st_mtime_ns for path in paths),
-        )
-    except (ValueError, OSError, EOFError, ImageFileError, HeaderDataError) as error:
-        st.error(f"Unable to load the model review case. {error}")
-        return
+    from title_page import workspace_entry
 
-    slices = reference.sum(axis=(0, 1))
-    case_metrics, controls = st.columns([1, 2], gap="medium")
-    with case_metrics, st.container(border=True):
-        overlap = int(np.count_nonzero(reference & prediction))
-        reference_count = int(slices.sum())
-        predicted_count = int(np.count_nonzero(prediction))
-        total = reference_count + predicted_count
-        st.metric("Whole-volume Dice", f"{2 * overlap / total:.3f}" if total else "No marked voxels")
-    with controls, st.container(border=True):
-        initial = int(slices.argmax()) + 1
-        index = (
-            st.slider("Axial slice", 1, len(slices), initial, key=f"review_slice_{case_key}") - 1
-            if len(slices) > 1 else 0
-        )
-        opacity = st.slider("Overlay opacity", 0, 100, 70, key="review_opacity") / 100
+    workspace_entry()
+    st.html(Path(__file__).with_name("scan_viewer.css"))
+    st.html("""
+        <div class="ct-viewer-rail">
+            <span>CT HEMORRHAGE</span>
+            <span>SCIENTIFIC PROTOTYPE</span>
+        </div>
+    """)
+    st.page_link(analysis_page, label="Back to scan viewer", icon=":material/arrow_back:")
+    st.title("Model results")
+    st.caption("Experimental hemorrhage segmentation · Research use only. Not for diagnostic purposes.")
 
-    section = values[:, :, index].T[::-1, ::-1]
-    ref_slice = reference[:, :, index].T[::-1, ::-1]
-    pred_slice = prediction[:, :, index].T[::-1, ::-1]
-    for column, (title, overlay, warm) in zip(st.columns(3), (
-        ("Original CT", None, False),
-        ("Reference annotation", ref_slice, False),
-        ("Model prediction", pred_slice, True),
-    )):
-        with column, st.container(border=True):
-            st.markdown(f"**{title}**")
-            st.image(render_slice(section, 40, 120, mask=overlay, opacity=opacity, warm=warm))
-            if overlay is not None:
-                st.caption(f"{np.count_nonzero(overlay):,} marked pixels on this slice")
+    active_id, active_scan = st.session_state.get("viewer_volume", (None, None))
+    has_active_scan = active_scan is not None and st.session_state.get("analysis_source") == "volume-prediction"
+    options = ["Strong overlap", "Missed region"]
+    if has_active_scan:
+        options.insert(0, "Current CT volume")
+    case = st.segmented_control("Case to review", options, default=options[0], key="results-case") or options[0]
+    values = reference = prediction = None
+    if case == "Current CT volume":
+        scan, values, _ = active_scan
+        saved_id, saved_mask = st.session_state.get("volume_prediction", (None, None))
+        if saved_id is not None and saved_id[0] == active_id:
+            prediction = saved_mask
+        uploaded = st.file_uploader("Optional aligned NIfTI reference mask", type=["nii", "gz"],
+                                    key=f"results-mask-{active_id}")
+        if uploaded is not None:
+            try:
+                from nibabel.filebasedimages import ImageFileError
+                from nibabel.wrapstruct import WrapStructError
+
+                _, reference = aligned_volumes(scan, decode_nifti(uploaded.getvalue()))
+            except (ValueError, OSError, EOFError, ImageFileError, WrapStructError) as error:
+                st.error(f"Unable to open the reference mask. {error}")
+    else:
+        case_key = "strong" if case == "Strong overlap" else "failure"
+        folder = Path(__file__).resolve().parents[1] / "data" / "model-review" / case_key
+        paths = [folder / name for name in ("scan.nii.gz", "mask.nii.gz", "prediction.nii.gz")]
+        if all(path.is_file() for path in paths):
+            try:
+                from nibabel.filebasedimages import ImageFileError
+                from nibabel.wrapstruct import WrapStructError
+
+                values, reference, prediction = read_review_case(
+                    *(str(path) for path in paths), tuple(path.stat().st_mtime_ns for path in paths),
+                )
+            except (ValueError, OSError, EOFError, ImageFileError, WrapStructError) as error:
+                st.error(f"Unable to load the model review case. {error}")
+        else:
+            st.info("Case images are available in the local research checkout. To compare images here, "
+                    "open a CT volume in the Scan Viewer and generate an overlay.")
+
+    if values is not None:
+        with st.container(key="ct-results-comparison"):
+            cards = st.columns(3, gap="small")
+            controls = st.container()
+            with controls:
+                slice_col, opacity_col = st.columns([2, 1])
+                with slice_col:
+                    count = values.shape[2]
+                    initial = (int(reference.sum(axis=(0, 1)).argmax())
+                               if reference is not None and reference.any() else count // 2)
+                    key = active_id if case == "Current CT volume" else case
+                    index = st.slider("Axial slice", 1, count, initial + 1, key=f"result-{key}") - 1 if count > 1 else 0
+                opacity = opacity_col.slider("Overlay opacity", 0, 100, 65) / 100
+            section = volume_section(values, 2, index)
+            for column, (label, mask, color, placeholder) in zip(cards, (
+                ("Original CT", None, "original", ""),
+                ("Reference annotation", reference, "reference", "Supply an aligned reference mask."),
+                ("Model prediction", prediction, "prediction", "Generate an overlay in the Scan Viewer."),
+            )):
+                with column, st.container(border=True, key=f"ct-results-{color}"):
+                    st.subheader(label)
+                    if color != "original" and mask is None:
+                        st.info(placeholder)
+                        continue
+                    overlay = volume_section(mask, 2, index) if mask is not None else None
+                    st.image(render_slice(section, 40, 120, mask=overlay, opacity=opacity,
+                                          warm=color == "prediction"), width="stretch")
+                    if overlay is not None:
+                        st.caption(f"{np.count_nonzero(overlay):,} marked pixels on this slice")
+            if reference is not None and prediction is not None:
+                total = int(reference.sum() + prediction.sum())
+                dice = f"{2 * np.count_nonzero(reference & prediction) / total:.3f}" if total else "Undefined"
+                st.metric("Selected volume Dice", dice)
+
+    with st.container(key="ct-results-cases"):
+        strong, missed = st.columns(2)
+        with strong, st.container(border=True):
+            st.subheader("Strong overlap")
+            st.write("Case 5 · Dice 0.790")
+            st.caption("The prediction overlaps much of the reference hemorrhage annotation.")
+        with missed, st.container(border=True):
+            st.subheader("Missed region")
+            st.write("Case 4 · Dice 0.002")
+            st.caption("The prediction barely overlaps the annotated hemorrhage.")
+    with st.container(border=True, key="ct-results-metrics"):
+        st.subheader("Held-out evaluation")
+        dice, precision, recall = st.columns(3)
+        dice.metric("Mean Dice", "0.354")
+        precision.metric("Mean voxel precision", "40.9%")
+        recall.metric("Mean voxel recall", "39.4%")
+        st.caption("Eight BHSD volumes with annotated hemorrhage · Metrics averaged per volume. "
+                   "Scan-level specificity was not measured on this set.")
 
 
 def volume_prediction():
@@ -492,6 +541,7 @@ def upload_scan():
         st.error("Choose a NIfTI volume ending in .nii or .nii.gz.")
         volume = None
     if volume is not None:
+        st.session_state.pop("viewer_volume", None)
         st.session_state.pop("analysis_scan", None)
         st.session_state.pop("volume_prediction", None)
         st.session_state["analysis_volume"] = (volume.name, volume.getvalue())
@@ -551,8 +601,7 @@ def home():
             st.session_state["analysis_source"] = "volume-prediction"
             st.switch_page(analysis_page)
         if st.button("Review model results"):
-            st.session_state["analysis_source"] = "review"
-            st.switch_page(analysis_page)
+            st.switch_page(results_page)
         if st.button("Open volume + mask"):
             st.session_state["analysis_source"] = "volume"
             st.switch_page(analysis_page)
@@ -569,7 +618,7 @@ def analysis():
 
     view_route = st.session_state.get("analysis_source", "slice")
 
-    if view_route in ("review", "volume"):
+    if view_route == "volume":
         from dashboard import dashboard_header, scan_workspace_style
 
         dashboard_header()
@@ -584,17 +633,17 @@ def analysis():
             </div>
         """)
         st.title("Scan viewer")
-    back, workspace = st.columns([1, 1])
+    back, workspace, results = st.columns(3)
     back.page_link(upload_page, label="Back to upload", icon=":material/arrow_back:")
     workspace.page_link(home_page, label="Research workspace")
-    if view_route not in ("review", "volume"):
+    results.page_link(results_page, label="View model results", icon=":material/arrow_forward:")
+    if view_route != "volume":
         st.caption("Research use only. Not for diagnostic purposes.")
     if st.session_state.get("analysis_source") == "volume-prediction":
         volume_prediction()
         return
     if st.session_state.get("analysis_source") == "review":
-        model_review()
-        return
+        st.switch_page(results_page)
     if st.session_state.get("analysis_source") == "volume":
         annotated_case()
         return
@@ -691,14 +740,15 @@ def analysis_redirect():
 
 
 def main():
-    global landing_page, upload_page, home_page, analysis_page
+    global landing_page, upload_page, home_page, analysis_page, results_page
     st.set_page_config(page_title="CT Slice Lab", layout="wide")
     landing_page = st.Page(landing, title="CT Hemorrhage", default=True)
     upload_page = st.Page(upload_scan, title="Upload a scan", url_path="upload")
     home_page = st.Page(home, title="Research workspace", url_path="workspace")
     analysis_page = st.Page(analysis, title="Scan viewer", url_path="viewer")
+    results_page = st.Page(model_review, title="Model results", url_path="results")
     legacy_analysis = st.Page(analysis_redirect, title="Scan analysis", url_path="analysis")
-    st.navigation([landing_page, upload_page, home_page, analysis_page, legacy_analysis], position="hidden").run()
+    st.navigation([landing_page, upload_page, home_page, analysis_page, results_page, legacy_analysis], position="hidden").run()
 
 
 def png_bytes(image):

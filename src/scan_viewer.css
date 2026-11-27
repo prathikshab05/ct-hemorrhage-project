@@ -26,3 +26,22 @@
   [data-testid="stHorizontalBlock"]:has(.st-key-ct-viewer-stage) > [data-testid="stColumn"] { width: 100%; }
   .st-key-ct-viewer-stage [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
 }
+
+.st-key-ct-results-comparison [data-testid="stVerticalBlockBorderWrapper"],
+.st-key-ct-results-cases [data-testid="stVerticalBlockBorderWrapper"],
+.st-key-ct-results-metrics {
+  background: #1d2b35; border: 1px solid #48606d; border-radius: 8px;
+}
+.st-key-ct-results-comparison h3 { font-size: clamp(.95rem,1.5vw,1.23rem); }
+.st-key-ct-results-reference h3 { color: #8de3eb; }
+.st-key-ct-results-prediction h3 { color: #ffb994; }
+.st-key-ct-results-comparison [data-testid="stImage"] { background: #000; border-radius: 5px; }
+.st-key-ct-results-comparison [data-testid="stImage"] img { width: 100%; }
+.st-key-ct-results-metrics [data-testid="stMetricValue"] { color: #a9e3df; }
+
+@media(max-width: 680px) {
+  .st-key-ct-results-comparison [data-testid="stHorizontalBlock"]:has(.st-key-ct-results-original),
+  .st-key-ct-results-cases [data-testid="stHorizontalBlock"] { flex-direction: column; }
+  .st-key-ct-results-comparison [data-testid="stHorizontalBlock"]:has(.st-key-ct-results-original) > [data-testid="stColumn"],
+  .st-key-ct-results-cases [data-testid="stColumn"] { width: 100%; }
+}
