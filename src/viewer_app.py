@@ -318,67 +318,133 @@ def volume_prediction():
     if selected_volume is None and upload is None and not use_example:
         st.session_state.pop("volume_prediction", None)
         return
-    if not checkpoint.is_file():
-        st.info("Add the trained segmentation checkpoint to the models folder.")
-        return
-
-    if selected_volume is not None:
-        contents = selected_volume[1]
-    else:
-        contents = example.read_bytes() if use_example else upload.getvalue()
-    scan_id = (hashlib.sha256(contents).hexdigest(), checkpoint.stat().st_mtime_ns)
-    saved_id, result = st.session_state.get("volume_prediction", (None, None))
-    if saved_id != scan_id:
-        st.session_state.pop("volume_prediction", None)
-        result = None
-
-    if st.button("Generate experimental overlay", type="primary"):
+    contents = selected_volume[1] if selected_volume is not None else (
+        example.read_bytes() if use_example else upload.getvalue()
+    )
+    fingerprint = hashlib.sha256(contents).hexdigest()
+    image_panel, controls = st.columns([3, 1.15], gap="medium")
+    with controls, st.container(border=True, key="ct-viewer-controls"):
+        st.subheader("Viewer controls")
         try:
             import nibabel as nib
             from nibabel.filebasedimages import ImageFileError
             from nibabel.spatialimages import HeaderDataError
-            from predict_segmentation import predict_mask
         except ImportError as error:
-            st.error(f"Segmentation setup is incomplete. {error}")
-            return
-        try:
-            with st.spinner("Running segmentation on the CT volume"):
-                scan = decode_nifti(contents)
-                if len(scan.shape) != 3 or min(scan.shape) < 1:
-                    raise ValueError("Choose a non-empty 3D CT volume.")
-                mask = predict_mask(scan, checkpoint)
-                result = aligned_volumes(scan, nib.Nifti1Image(mask, scan.affine))
-                st.session_state["volume_prediction"] = (scan_id, result)
-        except (ValueError, OSError, EOFError, RuntimeError, ImageFileError, HeaderDataError) as error:
-            st.error(f"Unable to generate an overlay. {error}")
+            st.error(f"Volume viewer setup is incomplete. {error}")
             return
 
-    if result is None:
-        return
-    values, prediction = result
-    counts = prediction.sum(axis=(0, 1))
-    if not counts.any():
-        st.info("The model produced an empty mask. A bleed may still be present.")
-    selected = int(counts.argmax()) if counts.any() else len(counts) // 2
-    controls, summary = st.columns([2, 1])
-    with controls:
-        index = (
-            st.slider("Axial slice", 1, len(counts), selected + 1, key=f"prediction-slice-{scan_id}") - 1
-            if len(counts) > 1 else 0
-        )
-        opacity = st.slider("Overlay opacity", 0, 100, 70, key="prediction-opacity") / 100
-    with summary:
-        st.metric("Model-marked pixels on this slice", f"{int(counts[index]):,}")
-    section = values[:, :, index].T[::-1, ::-1]
-    overlay = prediction[:, :, index].T[::-1, ::-1]
-    original, predicted = st.columns(2)
-    with original, st.container(border=True):
-        st.markdown("**Original CT**")
-        st.image(render_slice(section, 40, 120))
-    with predicted, st.container(border=True):
-        st.markdown("**Experimental model overlay**")
-        st.image(render_slice(section, 40, 120, mask=overlay, opacity=opacity, warm=True))
-    st.caption("Orange marks pixels selected by the model. Use the annotated review cases to see examples of missed regions.")
+        saved_id, scan_data = st.session_state.get("viewer_volume", (None, None))
+        if saved_id != fingerprint:
+            st.session_state.pop("viewer_volume", None)
+            try:
+                scan = nib.as_closest_canonical(decode_nifti(contents))
+                if len(scan.shape) != 3 or min(scan.shape) < 1:
+                    raise ValueError("Choose a non-empty 3D CT volume.")
+                if nib.aff2axcodes(scan.affine) != ("R", "A", "S"):
+                    raise ValueError("The volume could not be oriented for viewing.")
+                values = scan.get_fdata(dtype=np.float32)
+                if not np.isfinite(values).all():
+                    raise ValueError("The scan contains invalid pixel values.")
+                spacing = tuple(float(step) for step in nib.affines.voxel_sizes(scan.affine))
+            except (ValueError, OSError, EOFError, ImageFileError, HeaderDataError) as error:
+                st.error(f"Unable to open the CT volume. {error}")
+                return
+            scan_data = (scan, values, spacing)
+            st.session_state["viewer_volume"] = (fingerprint, scan_data)
+        scan, values, spacing = scan_data
+
+        plane = st.segmented_control("View plane", ["Axial", "Coronal", "Sagittal"],
+                                     default="Axial") or "Axial"
+        center, width = viewer_window("volume")
+        ready = checkpoint.is_file()
+        prediction_id = (fingerprint, checkpoint.stat().st_mtime_ns) if ready else None
+        saved_id, prediction = st.session_state.get("volume_prediction", (None, None))
+        if prediction_id is None or saved_id != prediction_id:
+            prediction = None
+            st.session_state.pop("volume_prediction", None)
+        if st.button("Generate experimental overlay", type="primary", disabled=not ready):
+            try:
+                from predict_segmentation import predict_mask
+
+                with st.spinner("Running segmentation on axial slices"):
+                    prediction = predict_mask(scan, checkpoint).astype(bool)
+                st.session_state["volume_prediction"] = (prediction_id, prediction)
+            except (ImportError, ValueError, OSError, RuntimeError, KeyError) as error:
+                st.error(f"Unable to generate an overlay. {error}")
+        if not ready:
+            st.caption("The segmentation checkpoint is unavailable.")
+        if prediction is not None:
+            show_overlay, opacity = viewer_overlay("Model overlay", "volume")
+            if not prediction.any():
+                st.caption("The model produced an empty mask.")
+        else:
+            show_overlay, opacity = False, 0.0
+
+    axis = {"Axial": 2, "Coronal": 1, "Sagittal": 0}[plane]
+    with image_panel, st.container(border=True, key="ct-viewer-stage"):
+        st.caption(f"{plane} view · {values.shape[axis]} slices")
+        preview = st.container()
+        initial = values.shape[axis] // 2
+        index = viewer_slice_index(plane, values.shape[axis], initial, fingerprint)
+        section = volume_section(values, axis, index)
+        overlay = volume_section(prediction, axis, index) if show_overlay else None
+        rendered = render_slice(section, center, width, mask=overlay, opacity=opacity)
+        height, columns = section.shape
+        x_axis, y_axis = ((1, 2), (0, 2), (0, 1))[axis]
+        ratio = columns * spacing[x_axis] / (height * spacing[y_axis])
+        preview.image(viewer_image(rendered, ratio), width="stretch")
+        if overlay is not None:
+            st.caption(f"Cyan shows the model output · {np.count_nonzero(overlay):,} marked pixels on this slice.")
+
+
+def viewer_window(key):
+    choices = {"Brain": (40, 80), "Subdural": (50, 150), "Bone": (500, 2000), "Custom": (40, 80)}
+    preset = st.segmented_control("Window preset", list(choices), default="Brain",
+                                  key=f"{key}-window") or "Brain"
+    center, width = choices[preset]
+    if preset == "Custom":
+        center = st.slider("Window level (HU)", -200, 1000, center, key=f"{key}-level")
+        width = st.slider("Window width (HU)", 1, 3000, width, key=f"{key}-width")
+    else:
+        st.caption(f"Width {width} HU · Level {center} HU")
+    return center, width
+
+
+def viewer_overlay(label, key):
+    visible = st.toggle(label, value=True, key=f"{key}-overlay")
+    opacity = st.slider("Overlay opacity", 0, 100, 65, disabled=not visible,
+                        key=f"{key}-opacity") / 100
+    return visible, opacity
+
+
+def viewer_slice_index(plane, count, initial, fingerprint):
+    if count == 1:
+        return 0
+    key = f"viewer-index-{fingerprint}-{plane}"
+    current = st.session_state.get(key, initial + 1)
+    previous, step, following = st.columns([1, 5, 1])
+    with previous:
+        st.button("Previous", key=f"{key}-prev", disabled=current <= 1,
+                  on_click=st.session_state.update, args=({key: current - 1},))
+    with following:
+        st.button("Next", key=f"{key}-next", disabled=current >= count,
+                  on_click=st.session_state.update, args=({key: current + 1},))
+    return step.slider(f"{plane} slice", 1, count, initial + 1, key=key) - 1
+
+
+def volume_section(volume, axis, index):
+    section = np.take(volume, index, axis=axis).T[::-1]
+    return section[:, ::-1] if axis != 0 else section
+
+
+def viewer_image(rendered, ratio=None):
+    image = Image.fromarray(rendered)
+    if ratio is not None and np.isfinite(ratio) and ratio > 0:
+        width = max(1, round(768 * min(1, ratio)))
+        height = max(1, round(768 * min(1, 1 / ratio)))
+        image = image.resize((width, height), Image.Resampling.BILINEAR)
+    return image
+
 
 def landing():
     from title_page import title_page
@@ -408,19 +474,19 @@ def upload_scan():
                 <div class="ct-upload-option">
                     <h2>CT volume</h2>
                     <p class="ct-upload-format">3D NIfTI · .nii or .nii.gz</p>
-                    <p>Generate an experimental hemorrhage overlay for each axial slice.</p>
+                    <p>Generate an experimental overlay for a full scan.</p>
                 </div>
             """)
-            volume = st.file_uploader("Upload a CT volume", type=["nii", "gz"], key="upload-volume")
+            volume = st.file_uploader("Upload a CT volume", type=["nii", "gz"], key="upload-volume", label_visibility="collapsed")
         with dicom_col:
             st.html("""
                 <div class="ct-upload-option">
                     <h2>DICOM slice</h2>
                     <p class="ct-upload-format">Single CT image · .dcm</p>
-                    <p>Run the research classifier to view hemorrhage subtype scores.</p>
+                    <p>Run the classifier to view experimental subtype scores.</p>
                 </div>
             """)
-            dicom = st.file_uploader("Upload a DICOM slice", type=["dcm"], key="upload-dicom")
+            dicom = st.file_uploader("Upload a DICOM slice", type=["dcm"], key="upload-dicom", label_visibility="collapsed")
 
     if volume is not None and not volume.name.lower().endswith((".nii", ".nii.gz")):
         st.error("Choose a NIfTI volume ending in .nii or .nii.gz.")
@@ -498,12 +564,29 @@ def home():
         st.markdown("[Image source](https://commons.wikimedia.org/wiki/File:Intracerebral_hemorrhage.jpg) · [License](https://creativecommons.org/licenses/by/2.0/)")
 
 def analysis():
-    from dashboard import dashboard_header, scan_montage, scan_workspace_style
+    view_route = st.session_state.get("analysis_source", "slice")
+    from title_page import workspace_entry
 
-    dashboard_header()
-    st.page_link(upload_page, label="Back to upload", icon=":material/arrow_back:")
-    st.page_link(home_page, label="Research workspace")
-    scan_workspace_style()
+    if view_route in ("review", "volume"):
+        from dashboard import dashboard_header, scan_workspace_style
+
+        dashboard_header()
+        scan_workspace_style()
+    else:
+        workspace_entry()
+        st.html(Path(__file__).with_name("scan_viewer.css"))
+        st.html("""
+            <div class="ct-viewer-rail">
+                <span>CT HEMORRHAGE</span>
+                <span>SCIENTIFIC PROTOTYPE</span>
+            </div>
+        """)
+        st.title("Scan viewer")
+    back, workspace = st.columns([1, 1])
+    back.page_link(upload_page, label="Back to upload", icon=":material/arrow_back:")
+    workspace.page_link(home_page, label="Research workspace")
+    if view_route not in ("review", "volume"):
+        st.caption("Research use only. Not for diagnostic purposes.")
     if st.session_state.get("analysis_source") == "volume-prediction":
         volume_prediction()
         return
@@ -513,7 +596,7 @@ def analysis():
     if st.session_state.get("analysis_source") == "volume":
         annotated_case()
         return
-    with st.expander("Open a different scan"):
+    with st.expander("Replace DICOM slice or open a reference mask"):
         uploaded = st.file_uploader("Research CT slice (.dcm)", type=["dcm"], key="analysis-dicom")
         if st.button("Open CT volume and mask"):
             st.session_state["analysis_source"] = "volume"
@@ -523,16 +606,15 @@ def analysis():
         case = (uploaded.name, uploaded.getvalue())
         st.session_state["analysis_scan"] = case
     if case is None:
-        image_col, details = st.columns([3.15, 1], gap="medium")
-        with image_col, st.container(border=True):
-            st.subheader("Axial head CT")
+        image_col, details = st.columns([3, 1.15], gap="medium")
+        with image_col, st.container(border=True, key="ct-viewer-stage"):
+            st.caption("Axial view · Teaching image")
             st.image(TEACHING_CT, width=560)
-            st.caption("Published teaching image · Yadav et al. (2007), CC BY 2.0")
-            st.markdown("[Image source](https://commons.wikimedia.org/wiki/File:Intracerebral_hemorrhage.jpg) · [License](https://creativecommons.org/licenses/by/2.0/)")
-        with details, st.container(border=True):
+        with details, st.container(border=True, key="ct-viewer-controls"):
             st.subheader("Teaching example")
             st.write("The authors identify a thalamic hemorrhage on this head CT.")
-            st.caption("The published JPEG is for visual reference. Upload a research DICOM to run the classifier.")
+            st.caption("A published JPEG is available for visual review. Upload a CT volume or DICOM for research analysis.")
+            st.markdown("[Yadav et al. (2007)](https://commons.wikimedia.org/wiki/File:Intracerebral_hemorrhage.jpg) · [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/)")
         return
 
     name, contents = case
@@ -552,23 +634,12 @@ def analysis():
     )
     checkpoint = next((path for path in candidates if path.is_file()), candidates[-1])
     scan_id = (hashlib.sha256(contents).hexdigest(), checkpoint.name)
-    image_panel, metrics = st.columns([3.15, 1], gap="medium")
-    with image_panel, st.container(border=True):
-        st.subheader("CT slice viewer")
-        st.caption(f"{name} · Single DICOM image")
-        scans = st.container()
-        preset_col, center_col, width_col = st.columns(3)
-        preset = preset_col.selectbox("Contrast preset", ["Brain", "Wide", "Bone"])
-        center_default, width_default = {"Brain": (40, 80), "Wide": (50, 200), "Bone": (500, 2000)}[preset]
-        center = center_col.slider("Window center", -200, 1000, center_default, key=f"analysis-{preset}-center")
-        width = width_col.slider("Window width", 1, 3000, width_default, key=f"analysis-{preset}-width")
+    image_panel, metrics = st.columns([3, 1.15], gap="medium")
+    with metrics, st.container(border=True, key="ct-viewer-controls"):
+        st.subheader("Viewer controls")
+        center, width = viewer_window("dicom")
         mask = None
-        with st.expander("Add a region overlay", expanded=True):
-            st.caption("Load the mask for this exact slice, or open the volume predictor for a full CT.")
-            if st.button("Open volume predictor"):
-                st.session_state.pop("analysis_volume", None)
-                st.session_state["analysis_source"] = "volume-prediction"
-                st.rerun()
+        with st.expander("Add a reference mask"):
             annotation = st.file_uploader("Aligned binary mask (.npy)", type=["npy"], key=f"mask-{scan_id}")
             if annotation is not None:
                 try:
@@ -580,18 +651,10 @@ def analysis():
                     mask = candidate.astype(bool)
                 except (ValueError, OSError, EOFError) as error:
                     st.warning(f"Overlay unavailable. {error}")
-            show_mask = st.toggle("Show mask", value=True, disabled=mask is None)
-            opacity = st.slider("Overlay opacity", 0, 100, 65, disabled=mask is None) / 100
-        image = render_slice(values, center, width, inverted, mask if show_mask else None, opacity, warm=True)
-        with scans:
-            preview = png_bytes(image)
-            label = "SLICE 001 · MASK OVERLAY" if show_mask and mask is not None and mask.any() else "DICOM / SLICE 001"
-            scan_montage([(preview, label, True)])
-        st.download_button("Export slice PNG", preview, "ct-slice.png", "image/png")
-
-    with metrics, st.container(border=True):
-        st.subheader("Analysis metrics")
-        st.caption("Experimental model scores for this slice")
+        show_mask, opacity = viewer_overlay("Reference mask", "dicom") if mask is not None else (False, 0.0)
+        st.divider()
+        st.subheader("Research classifier")
+        st.caption("Uncalibrated scores for this slice.")
         saved_id, scores = st.session_state.get("analysis_scores", (None, None))
         if saved_id != scan_id:
             scores = None
@@ -621,12 +684,17 @@ def analysis():
             for label, value in scores.items():
                 if label != "any":
                     st.progress(value, text=f"{label.capitalize()} · {value:.3f}")
-        st.divider()
-        st.markdown("**Annotation**")
-        if mask is None:
-            st.caption("Upload an aligned mask to show the marked region on the scan.")
-        else:
-            st.metric("Marked pixels", f"{np.count_nonzero(mask):,}")
+    with image_panel, st.container(border=True, key="ct-viewer-stage"):
+        st.caption(f"Single DICOM slice · {name}")
+        image = render_slice(values, center, width, inverted, mask if show_mask else None, opacity)
+        st.image(viewer_image(image), width="stretch")
+        st.download_button("Export slice PNG", png_bytes(image), "ct-slice.png", "image/png")
+        if mask is not None and show_mask:
+            st.caption(f"Cyan shows the supplied mask · {np.count_nonzero(mask):,} marked pixels.")
+
+
+def analysis_redirect():
+    st.switch_page(analysis_page)
 
 
 def main():
@@ -635,8 +703,9 @@ def main():
     landing_page = st.Page(landing, title="CT Hemorrhage", default=True)
     upload_page = st.Page(upload_scan, title="Upload a scan", url_path="upload")
     home_page = st.Page(home, title="Research workspace", url_path="workspace")
-    analysis_page = st.Page(analysis, title="Scan analysis", url_path="analysis")
-    st.navigation([landing_page, upload_page, home_page, analysis_page], position="hidden").run()
+    analysis_page = st.Page(analysis, title="Scan viewer", url_path="viewer")
+    legacy_analysis = st.Page(analysis_redirect, title="Scan analysis", url_path="analysis")
+    st.navigation([landing_page, upload_page, home_page, analysis_page, legacy_analysis], position="hidden").run()
 
 
 def png_bytes(image):

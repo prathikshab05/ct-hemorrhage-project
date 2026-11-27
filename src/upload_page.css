@@ -49,3 +49,7 @@
   .st-key-ct-upload-panel [data-testid="stHorizontalBlock"] { flex-direction: column; }
   .st-key-ct-upload-panel [data-testid="stColumn"] { width: 100%; flex: 1 1 auto; }
 }
+
+@media(min-width: 641px) {
+  .ct-upload-option { min-height: 128px; }
+}
