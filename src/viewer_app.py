@@ -249,7 +249,9 @@ def model_review():
             <span>SCIENTIFIC PROTOTYPE</span>
         </div>
     """)
-    st.page_link(analysis_page, label="Back to scan viewer", icon=":material/arrow_back:")
+    back, onward = st.columns(2)
+    back.page_link(analysis_page, label="Back to scan viewer", icon=":material/arrow_back:")
+    onward.page_link(anatomy_route, label="Explore anatomy", icon=":material/arrow_forward:")
     st.title("Model results")
     st.caption("Experimental hemorrhage segmentation · Research use only. Not for diagnostic purposes.")
 
@@ -352,7 +354,9 @@ def render_comparison(case, active_id, active_scan):
                     overlay = volume_section(mask, 2, index) if mask is not None else None
                     st.image(render_slice(section, 40, 120, mask=overlay, opacity=opacity,
                                           warm=color == "prediction"), width="stretch")
-                    if overlay is not None:
+                    if overlay is None:
+                        st.caption(f"Unmasked input · Slice {index + 1} / {count}")
+                    else:
                         st.caption(f"{np.count_nonzero(overlay):,} marked pixels on this slice")
             if reference is not None and prediction is not None:
                 total = int(reference.sum() + prediction.sum())
@@ -595,6 +599,7 @@ def home():
     workspace_entry()
     st.page_link(landing_page, label="Back to title", icon=":material/arrow_back:")
     st.page_link(upload_page, label="Upload a scan")
+    st.page_link(anatomy_route, label="Explore anatomy")
     dashboard_header()
     main_panel, hologram, preview = st.columns([1, 2.65, 1.2], gap="medium")
     with main_panel, st.container(border=True):
@@ -752,16 +757,26 @@ def analysis_redirect():
     st.switch_page(analysis_page)
 
 
+def anatomy():
+    from anatomy_page import anatomy_page
+
+    anatomy_page(results_page, upload_page)
+
+
 def main():
-    global landing_page, upload_page, home_page, analysis_page, results_page
+    global landing_page, upload_page, home_page, analysis_page, results_page, anatomy_route
     st.set_page_config(page_title="CT Slice Lab", layout="wide")
     landing_page = st.Page(landing, title="CT Hemorrhage", default=True)
     upload_page = st.Page(upload_scan, title="Upload a scan", url_path="upload")
     home_page = st.Page(home, title="Research workspace", url_path="workspace")
     analysis_page = st.Page(analysis, title="Scan viewer", url_path="viewer")
     results_page = st.Page(model_review, title="Model results", url_path="results")
+    anatomy_route = st.Page(anatomy, title="Interactive anatomy", url_path="anatomy")
     legacy_analysis = st.Page(analysis_redirect, title="Scan analysis", url_path="analysis")
-    st.navigation([landing_page, upload_page, home_page, analysis_page, results_page, legacy_analysis], position="hidden").run()
+    st.navigation(
+        [landing_page, upload_page, home_page, analysis_page, results_page, anatomy_route, legacy_analysis],
+        position="hidden",
+    ).run()
 
 
 def png_bytes(image):
