@@ -57,31 +57,50 @@ def anatomy_page(results_page, upload_page):
     upload.page_link(upload_page, label="Upload a scan", icon=":material/upload:")
     st.title("Interactive anatomy")
 
-    with st.container(key="anatomy-explorer"):
-        selected = st.segmented_control(
-            "Explore a region", list(REGIONS), default="Frontal lobe", key="anatomy-region",
-        ) or "Frontal lobe"
-        art, details = st.columns([2.6, 1], gap="medium")
-        markers = "".join(
-            f'<div class="ct-anatomy-pin{" is-selected" if name == selected else ""}" '
-            f'style="left:{x}%;top:{y}%"><span>{name}</span></div>'
-            for name, (x, y, _, _) in REGIONS.items()
-        )
-        art.html(f"""
+    markers = "".join(
+        f'<button type="button" class="ct-anatomy-pin{" is-selected" if index == 0 else ""}" '
+        f'style="left:{x}%;top:{y}%" data-region="{index}" '
+        f'aria-controls="ct-region-{index}" aria-pressed="{str(index == 0).lower()}">'
+        f'<span>{name}</span></button>'
+        for index, (name, (x, y, _, _)) in enumerate(REGIONS.items())
+    )
+    details = "".join(
+        f'<article id="ct-region-{index}"{" hidden" if index else ""}>'
+        f'<h2>{name}</h2><p class="ct-anatomy-location">{location}</p><p>{function}</p></article>'
+        for index, (name, (_, _, location, function)) in enumerate(REGIONS.items())
+    )
+    st.html(f"""
+        <div class="ct-anatomy-explorer">
             <figure class="ct-anatomy-figure">
                 <div class="ct-anatomy-image">
                     <img src="{brain_image_uri()}" alt="Neon side view of the brain">
-                    <div aria-hidden="true">{markers}</div>
+                    <div class="ct-anatomy-pins" role="group" aria-label="Explore a brain region">{markers}</div>
                 </div>
                 <figcaption>Educational illustration · Approximate locations · Not a patient scan</figcaption>
             </figure>
-        """)
-        _, _, location, function = REGIONS[selected]
-        with details, st.container(border=True, key="anatomy-detail"):
-            st.subheader(selected)
-            st.caption(location)
-            st.write(function)
-            st.markdown("[Brain anatomy reference · NINDS](https://www.ninds.nih.gov/sites/default/files/2025-05/know-your-brain-brian-basics.pdf)")
+            <section class="ct-anatomy-detail">
+                <div aria-live="polite">{details}</div>
+                <a href="https://www.ninds.nih.gov/sites/default/files/2025-05/know-your-brain-brian-basics.pdf">Brain anatomy reference · NINDS</a>
+            </section>
+        </div>
+        <script>
+          (() => {{
+            const explorer = document.querySelector(".ct-anatomy-explorer");
+            if (!explorer || explorer.dataset.bound) return;
+            explorer.dataset.bound = "true";
+            explorer.addEventListener("click", (event) => {{
+              const selected = event.target.closest(".ct-anatomy-pin");
+              if (!selected) return;
+              for (const pin of explorer.querySelectorAll(".ct-anatomy-pin")) {{
+                const active = pin === selected;
+                pin.classList.toggle("is-selected", active);
+                pin.setAttribute("aria-pressed", String(active));
+                explorer.querySelector("#ct-region-" + pin.dataset.region).hidden = !active;
+              }}
+            }});
+          }})();
+        </script>
+    """, unsafe_allow_javascript=True)
 
     st.header("CT and model glossary")
     for tab, (title, entries) in zip(st.tabs(list(GLOSSARY)), GLOSSARY.items()):

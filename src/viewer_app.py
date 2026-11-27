@@ -142,8 +142,9 @@ def aligned_volumes(scan, mask):
 
 
 def annotated_case():
-    from dashboard import scan_montage
+    from dashboard import scan_montage, scan_workspace_style
 
+    scan_workspace_style(show_heading=False)
     try:
         import nibabel as nib
     except ModuleNotFoundError:
@@ -583,7 +584,14 @@ def upload_scan():
                 st.session_state.pop(key, None)
             st.session_state["analysis_source"] = "slice"
             st.switch_page(analysis_page)
-        st.page_link(home_page, label="Explore the research workspace")
+        if st.button("Open CT volume + reference mask"):
+            st.session_state["analysis_source"] = "volume"
+            st.switch_page(analysis_page)
+        local_example = Path(__file__).resolve().parents[1] / "data/model-review/strong/scan.nii.gz"
+        if local_example.is_file() and st.button("Open local BHSD volume"):
+            st.session_state.pop("analysis_volume", None)
+            st.session_state["analysis_source"] = "volume-prediction"
+            st.switch_page(analysis_page)
     st.html("""
         <p class="ct-upload-foot">
             Use de-identified research scans only. The hosted app processes uploads on its server.
@@ -592,71 +600,25 @@ def upload_scan():
     """)
 
 
-def home():
-    from title_page import workspace_entry
-    from dashboard import brain_reference, dashboard_header
+def workspace_redirect():
+    st.switch_page(upload_page)
 
-    workspace_entry()
-    st.page_link(landing_page, label="Back to title", icon=":material/arrow_back:")
-    st.page_link(upload_page, label="Upload a scan")
-    st.page_link(anatomy_route, label="Explore anatomy")
-    dashboard_header()
-    main_panel, hologram, preview = st.columns([1, 2.65, 1.2], gap="medium")
-    with main_panel, st.container(border=True):
-        st.subheader("Scan controls")
-        st.caption("Use de-identified research files for uploads.")
-        uploaded = st.file_uploader("CT slice", type=["dcm"], key="dashboard-dicom")
-        if uploaded is not None:
-            st.session_state["analysis_source"] = "slice"
-            st.session_state["analysis_scan"] = (uploaded.name, uploaded.getvalue())
-            st.switch_page(analysis_page)
-        if st.button("Open teaching scan", type="primary"):
-            st.session_state["analysis_source"] = "slice"
-            st.session_state.pop("analysis_scan", None)
-            st.switch_page(analysis_page)
-        if st.button("Predict on a CT volume"):
-            st.session_state.pop("analysis_volume", None)
-            st.session_state["analysis_source"] = "volume-prediction"
-            st.switch_page(analysis_page)
-        if st.button("Review model results"):
-            st.switch_page(results_page)
-        if st.button("Open volume + mask"):
-            st.session_state["analysis_source"] = "volume"
-            st.switch_page(analysis_page)
-    with hologram, st.container(border=True):
-        brain_reference()
-    with preview, st.container(border=True):
-        st.subheader("Axial head CT")
-        st.image(TEACHING_CT)
-        st.caption("Published teaching scan · Yadav et al. (2007), CC BY 2.0")
-        st.markdown("[Image source](https://commons.wikimedia.org/wiki/File:Intracerebral_hemorrhage.jpg) · [License](https://creativecommons.org/licenses/by/2.0/)")
 
 def analysis():
     from title_page import workspace_entry
 
     view_route = st.session_state.get("analysis_source", "slice")
 
-    if view_route == "volume":
-        from dashboard import dashboard_header, scan_workspace_style
-
-        dashboard_header()
-        scan_workspace_style()
-    else:
-        workspace_entry()
-        st.html(Path(__file__).with_name("scan_viewer.css"))
-        st.html("""
-            <div class="ct-viewer-rail">
-                <span>CT HEMORRHAGE</span>
-                <span>SCIENTIFIC PROTOTYPE</span>
-            </div>
-        """)
-        st.title("Scan viewer")
-    back, workspace, results = st.columns(3)
-    back.page_link(upload_page, label="Back to upload", icon=":material/arrow_back:")
-    workspace.page_link(home_page, label="Research workspace")
-    results.page_link(results_page, label="View model results", icon=":material/arrow_forward:")
-    if view_route != "volume":
-        st.caption("Research use only. Not for diagnostic purposes.")
+    workspace_entry()
+    st.html(Path(__file__).with_name("scan_viewer.css"))
+    st.html("""
+        <div class="ct-viewer-rail">
+            <span>CT HEMORRHAGE</span>
+            <span>SCIENTIFIC PROTOTYPE</span>
+        </div>
+    """)
+    st.title("Scan viewer")
+    st.caption("Research use only. Not for diagnostic purposes.")
     if st.session_state.get("analysis_source") == "volume-prediction":
         volume_prediction()
         return
@@ -764,19 +726,32 @@ def anatomy():
 
 
 def main():
-    global landing_page, upload_page, home_page, analysis_page, results_page, anatomy_route
+    global landing_page, upload_page, analysis_page, results_page, anatomy_route
     st.set_page_config(page_title="CT Slice Lab", layout="wide")
     landing_page = st.Page(landing, title="CT Hemorrhage", default=True)
     upload_page = st.Page(upload_scan, title="Upload a scan", url_path="upload")
-    home_page = st.Page(home, title="Research workspace", url_path="workspace")
+    legacy_workspace = st.Page(workspace_redirect, title="Research workspace", url_path="workspace")
     analysis_page = st.Page(analysis, title="Scan viewer", url_path="viewer")
     results_page = st.Page(model_review, title="Model results", url_path="results")
     anatomy_route = st.Page(anatomy, title="Interactive anatomy", url_path="anatomy")
     legacy_analysis = st.Page(analysis_redirect, title="Scan analysis", url_path="analysis")
-    st.navigation(
-        [landing_page, upload_page, home_page, analysis_page, results_page, anatomy_route, legacy_analysis],
-        position="hidden",
-    ).run()
+    from methodology_page import methodology_page
+
+    methodology = st.Page(methodology_page, title="Methodology", url_path="methodology")
+    links = {
+        "Home": landing_page, "Upload": upload_page, "Scan Viewer": analysis_page,
+        "Model Results": results_page, "Anatomy": anatomy_route, "Methodology": methodology,
+    }
+    current = st.navigation([*links.values(), legacy_workspace, legacy_analysis], position="hidden")
+    if current in (legacy_workspace, legacy_analysis):
+        current.run()
+        return
+
+    st.html(Path(__file__).with_name("site_nav.css"))
+    with st.container(key="ct-site-nav", horizontal=True, wrap=True, gap="xsmall"):
+        for label, page in links.items():
+            st.page_link(page, label=label)
+    current.run()
 
 
 def png_bytes(image):

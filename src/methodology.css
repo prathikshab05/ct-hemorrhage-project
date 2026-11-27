@@ -1,0 +1,10 @@
+.st-key-ct-method-grid [data-testid="stColumn"] [data-testid="stVerticalBlock"] {
+  background: #1c2b35; border-radius: 8px;
+}
+.st-key-ct-method-grid h3,.st-key-ct-method-eval h3 { color: #a9e3df; }
+.st-key-ct-method-grid [data-testid="stColumn"]:last-child h3 { color: #ffd0a4; }
+.st-key-ct-method-eval { background: #18272f; border-radius: 8px; }
+@media(max-width: 760px) {
+  .st-key-ct-method-grid [data-testid="stHorizontalBlock"] { flex-direction: column; }
+  .st-key-ct-method-grid [data-testid="stColumn"] { width: 100%; flex: 1 1 auto; }
+}

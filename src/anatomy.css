@@ -1,7 +1,10 @@
-.st-key-anatomy-detail {
+.ct-anatomy-explorer { display: grid; grid-template-columns: minmax(0,2.6fr) minmax(0,1fr); gap: 16px; align-items: start; }
+.ct-anatomy-detail {
+  padding: 20px;
   background: #1d2b35; border: 1px solid #48606d; border-radius: 8px;
 }
-.st-key-anatomy-detail h3 { color: #a9e3df; }
+.ct-anatomy-detail h2 { color: #a9e3df; font-size: 1.35rem; }
+.ct-anatomy-location { color: #b9d0d6; }
 .ct-anatomy-figure {
   margin: 0; border: 1px solid #48606d; border-radius: 8px;
   overflow: hidden; background: #10222b;
@@ -35,8 +38,11 @@
 .ct-anatomy-glossary dt { font-weight: 600; color: #a9e3df; }
 .ct-anatomy-glossary dd { margin: 0; color: #e2edf0; }
 @media (max-width: 720px) {
-  .st-key-anatomy-explorer [data-testid="stHorizontalBlock"] { flex-direction: column; }
-  .st-key-anatomy-explorer [data-testid="stColumn"] { width: 100%; flex: 1 1 auto; }
+  .ct-anatomy-explorer { grid-template-columns: 1fr; }
   .ct-anatomy-glossary { display: block; }
   .ct-anatomy-glossary dd { margin: 3px 0 12px; }
 }
+
+.ct-anatomy-pin { padding: 0; cursor: pointer; }
+.ct-anatomy-pin::before { content: ""; position: absolute; inset: -8px; }
+.ct-anatomy-pin:focus-visible { outline: 2px solid #fff; outline-offset: 4px; }
