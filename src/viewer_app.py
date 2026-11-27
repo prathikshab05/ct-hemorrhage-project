@@ -258,7 +258,42 @@ def model_review():
     options = ["Strong overlap", "Missed region"]
     if has_active_scan:
         options.insert(0, "Current CT volume")
-    case = st.segmented_control("Case to review", options, default=options[0], key="results-case") or options[0]
+    tabs = st.tabs(options, key="results-case-tab", on_change="rerun")
+    for case, tab in zip(options, tabs):
+        if tab.open:
+            with tab:
+                render_comparison(case, active_id, active_scan)
+
+    with st.container(border=True, key="ct-results-metrics"):
+        st.subheader("Held-out evaluation")
+        dice, precision, recall = st.columns(3)
+        dice.metric("Mean Dice", "0.354")
+        precision.metric("Mean voxel precision", "40.9%")
+        recall.metric("Mean voxel recall", "39.4%")
+        st.caption("Eight BHSD volumes with annotated hemorrhage · Metrics averaged per volume. "
+                   "Scan-level specificity was not measured on this set.")
+
+
+@st.cache_data(show_spinner="Loading the published BHSD example and running segmentation", max_entries=2)
+def read_published_review(case_key, checkpoint, checkpoint_modified):
+    import nibabel as nib
+
+    from predict_segmentation import predict_mask
+    from review_examples import fetch_case
+
+    scan_bytes, reference_bytes = fetch_case(case_key)
+    scan = nib.as_closest_canonical(decode_nifti(scan_bytes))
+    values, reference = aligned_volumes(scan, decode_nifti(reference_bytes))
+    prediction = predict_mask(scan, checkpoint).astype(bool)
+    return values, reference, prediction
+
+
+def render_comparison(case, active_id, active_scan):
+    from nibabel.filebasedimages import ImageFileError
+    from nibabel.wrapstruct import WrapStructError
+    from nibabel.spatialimages import HeaderDataError
+    from review_examples import CASES
+
     values = reference = prediction = None
     if case == "Current CT volume":
         scan, values, _ = active_scan
@@ -269,29 +304,26 @@ def model_review():
                                     key=f"results-mask-{active_id}")
         if uploaded is not None:
             try:
-                from nibabel.filebasedimages import ImageFileError
-                from nibabel.wrapstruct import WrapStructError
-
                 _, reference = aligned_volumes(scan, decode_nifti(uploaded.getvalue()))
-            except (ValueError, OSError, EOFError, ImageFileError, WrapStructError) as error:
+            except (ValueError, OSError, EOFError, ImageFileError, WrapStructError, HeaderDataError) as error:
                 st.error(f"Unable to open the reference mask. {error}")
     else:
         case_key = "strong" if case == "Strong overlap" else "failure"
         folder = Path(__file__).resolve().parents[1] / "data" / "model-review" / case_key
         paths = [folder / name for name in ("scan.nii.gz", "mask.nii.gz", "prediction.nii.gz")]
-        if all(path.is_file() for path in paths):
-            try:
-                from nibabel.filebasedimages import ImageFileError
-                from nibabel.wrapstruct import WrapStructError
-
+        try:
+            if all(path.is_file() for path in paths):
                 values, reference, prediction = read_review_case(
                     *(str(path) for path in paths), tuple(path.stat().st_mtime_ns for path in paths),
                 )
-            except (ValueError, OSError, EOFError, ImageFileError, WrapStructError) as error:
-                st.error(f"Unable to load the model review case. {error}")
-        else:
-            st.info("Case images are available in the local research checkout. To compare images here, "
-                    "open a CT volume in the Scan Viewer and generate an overlay.")
+            else:
+                checkpoint = Path(__file__).resolve().parents[1] / "assets/checkpoints/ct-segmenter-balanced-expanded.pt"
+                values, reference, prediction = read_published_review(case_key, str(checkpoint), checkpoint.stat().st_mtime_ns)
+        except (ValueError, OSError, EOFError, RuntimeError, ImageFileError, WrapStructError, HeaderDataError) as error:
+            st.warning(f"The published case could not be loaded. {error}")
+            return
+        st.caption(CASES[case_key]["description"])
+        st.caption("Held-out example from the [Brain Hemorrhage Segmentation Dataset](https://huggingface.co/datasets/Wendy-Fly/BHSD).")
 
     if values is not None:
         with st.container(key="ct-results-comparison"):
@@ -309,8 +341,8 @@ def model_review():
             section = volume_section(values, 2, index)
             for column, (label, mask, color, placeholder) in zip(cards, (
                 ("Original CT", None, "original", ""),
-                ("Reference annotation", reference, "reference", "Supply an aligned reference mask."),
-                ("Model prediction", prediction, "prediction", "Generate an overlay in the Scan Viewer."),
+                ("Reference annotation · cyan", reference, "reference", "Supply an aligned reference mask."),
+                ("Model prediction · orange", prediction, "prediction", "Generate an overlay in the Scan Viewer."),
             )):
                 with column, st.container(border=True, key=f"ct-results-{color}"):
                     st.subheader(label)
@@ -326,25 +358,6 @@ def model_review():
                 total = int(reference.sum() + prediction.sum())
                 dice = f"{2 * np.count_nonzero(reference & prediction) / total:.3f}" if total else "Undefined"
                 st.metric("Selected volume Dice", dice)
-
-    with st.container(key="ct-results-cases"):
-        strong, missed = st.columns(2)
-        with strong, st.container(border=True):
-            st.subheader("Strong overlap")
-            st.write("Case 5 · Dice 0.790")
-            st.caption("The prediction overlaps much of the reference hemorrhage annotation.")
-        with missed, st.container(border=True):
-            st.subheader("Missed region")
-            st.write("Case 4 · Dice 0.002")
-            st.caption("The prediction barely overlaps the annotated hemorrhage.")
-    with st.container(border=True, key="ct-results-metrics"):
-        st.subheader("Held-out evaluation")
-        dice, precision, recall = st.columns(3)
-        dice.metric("Mean Dice", "0.354")
-        precision.metric("Mean voxel precision", "40.9%")
-        recall.metric("Mean voxel recall", "39.4%")
-        st.caption("Eight BHSD volumes with annotated hemorrhage · Metrics averaged per volume. "
-                   "Scan-level specificity was not measured on this set.")
 
 
 def volume_prediction():
