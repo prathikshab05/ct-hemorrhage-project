@@ -7,6 +7,6 @@ matplotlib
 seaborn
 tqdm
 jupyterlab
-streamlit
+streamlit>=1.67,<2
 kaggle
 Pillow

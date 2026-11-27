@@ -372,9 +372,18 @@ def volume_prediction():
         st.image(render_slice(section, 40, 120, mask=overlay, opacity=opacity, warm=True))
     st.caption("Orange marks pixels selected by the model. Use the annotated review cases to see examples of missed regions.")
 
+def landing():
+    from title_page import title_page
+
+    title_page(home_page)
+
+
 def home():
+    from title_page import workspace_entry
     from dashboard import brain_reference, dashboard_header
 
+    workspace_entry()
+    st.page_link(landing_page, label="Back to title", icon=":material/arrow_back:")
     dashboard_header()
     main_panel, hologram, preview = st.columns([1, 2.65, 1.2], gap="medium")
     with main_panel, st.container(border=True):
@@ -537,11 +546,12 @@ def analysis():
 
 
 def main():
-    global home_page, analysis_page
+    global landing_page, home_page, analysis_page
     st.set_page_config(page_title="CT Slice Lab", layout="wide")
-    home_page = st.Page(home, title="Dashboard", default=True)
+    landing_page = st.Page(landing, title="CT Hemorrhage", default=True)
+    home_page = st.Page(home, title="Research workspace", url_path="workspace")
     analysis_page = st.Page(analysis, title="Scan analysis", url_path="analysis")
-    st.navigation([home_page, analysis_page], position="hidden").run()
+    st.navigation([landing_page, home_page, analysis_page], position="hidden").run()
 
 
 def png_bytes(image):
