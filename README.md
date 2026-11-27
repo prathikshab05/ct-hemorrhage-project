@@ -119,23 +119,18 @@ single-slice checkpoint.
 
 ### Generate an overlay on a research volume
 
-From the dashboard, select **Predict on a CT volume**. Upload a de-identified
-3D head CT in NIfTI format (`.nii` or `.nii.gz`), or select the local
-BHSD example. Click **Generate experimental overlay**. The orange mask shows
-the experimental single-slice model's output on the scan, with synchronized
-slice navigation and opacity controls. It does not require a reference mask.
-The viewer looks for `ct-segmenter-balanced-expanded.pt` in `models/` and then `assets/checkpoints/`. Use **Review
-model results** to compare that model with published annotations.
+Open **Upload** and select a de-identified 3D head CT in NIfTI format
+(`.nii` or `.nii.gz`). The Scan Viewer and Model Results links appear after
+the upload opens successfully. Click **Generate experimental overlay** to
+compute a mask for the current scan. With a DICOM slice, use **Run research
+classifier** to compute slice-level scores instead.
 
 ### Review model overlays
 
-Choose **Review model results** from the dashboard to compare the original CT,
-the reference annotation, and the experimental model mask on the same slice.
-The two BHSD examples were selected to show strong overlap and a missed region.
-For a local checkout, each case needs a `scan.nii.gz`, `mask.nii.gz`, and
-`prediction.nii.gz` under `data/model-review/strong/` or
-`data/model-review/failure/`. Generate the prediction with
-`src/predict_segmentation.py` and the intended checkpoint.
+**Model Results** shows only the active scan. For volumes, an optional aligned
+NIfTI reference mask enables the reference panel and Dice comparison. Uploading
+a replacement scan clears the previous mask and scores. The fixed test-set
+metrics are documented under **Methodology**.
 
 To test the neighboring-slice variant, add `--neighboring-slices` to the
 training command. The model uses three adjacent axial slices to predict the

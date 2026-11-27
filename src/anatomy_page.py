@@ -42,7 +42,7 @@ GLOSSARY = {
 }
 
 
-def anatomy_page(results_page, upload_page):
+def anatomy_page(upload_page):
     workspace_entry()
     st.html(Path(__file__).with_name("scan_viewer.css"))
     st.html(Path(__file__).with_name("anatomy.css"))
@@ -52,9 +52,7 @@ def anatomy_page(results_page, upload_page):
             <span>EDUCATIONAL REFERENCE</span>
         </div>
     """)
-    back, upload = st.columns(2)
-    back.page_link(results_page, label="Back to model results", icon=":material/arrow_back:")
-    upload.page_link(upload_page, label="Upload a scan", icon=":material/upload:")
+    st.page_link(upload_page, label="Upload a scan", icon=":material/upload:")
     st.title("Interactive anatomy")
 
     markers = "".join(
