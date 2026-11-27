@@ -64,16 +64,23 @@ def methodology_page():
                     "hemorrhage subtypes. The classifier’s scores are uncalibrated."
                 )
 
-    with st.container(border=True, key="ct-method-eval"):
+    show_segmentation_benchmarks("ct-method-eval")
+    with st.expander("Find the training and evaluation code"):
+        st.markdown(
+            f"- [Segmentation trainer]({REPOSITORY}/blob/main/src/train_segmentation.py)\n"
+            f"- [Native-grid evaluator]({REPOSITORY}/blob/main/src/evaluate_segmentation.py)\n"
+            f"- [Reproduction steps and experiment notes]({REPOSITORY}#bhsd-segmentation-experiment)"
+        )
+
+
+def show_segmentation_benchmarks(key):
+    with st.container(border=True, key=key):
         st.subheader("Held-out segmentation results")
         dice, precision, recall = st.columns(3)
         dice.metric("Mean Dice", "0.354")
         precision.metric("Mean voxel precision", "40.9%")
         recall.metric("Mean voxel recall", "39.4%")
-        st.caption("Averages across eight held-out BHSD volumes. Individual Dice scores ranged from 0.002 to 0.790.")
-        with st.expander("Find the training and evaluation code"):
-            st.markdown(
-                f"- [Segmentation trainer]({REPOSITORY}/blob/main/src/train_segmentation.py)\n"
-                f"- [Native-grid evaluator]({REPOSITORY}/blob/main/src/evaluate_segmentation.py)\n"
-                f"- [Reproduction steps and experiment notes]({REPOSITORY}#bhsd-segmentation-experiment)"
-            )
+        st.caption(
+            "Benchmarks from eight held-out BHSD volumes with annotated hemorrhage. "
+            "Individual Dice scores ranged from 0.002 to 0.790. Scan-level specificity was not measured."
+        )

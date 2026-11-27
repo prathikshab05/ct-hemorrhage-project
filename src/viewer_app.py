@@ -89,6 +89,7 @@ def aligned_volumes(scan, mask):
 
 
 def model_review():
+    from methodology_page import show_segmentation_benchmarks
     from title_page import workspace_entry
 
     workspace_entry()
@@ -105,15 +106,18 @@ def model_review():
     st.title("Model results")
     st.caption("Results for the current upload · Research use only. Not for diagnostic purposes.")
     source, name, fingerprint = st.session_state["active_scan"]
+    st.subheader("Current upload")
     st.text(name)
     if source == "slice":
         score_id, scores = st.session_state.get("analysis_scores", (None, None))
         if score_id is None or score_id[0] != fingerprint or scores is None:
-            st.info("Run the research classifier in the Scan Viewer to see scores here.")
+            st.info("Open the Scan Viewer to run the classifier for this slice.")
         else:
             show_classifier_scores(scores)
-        return
-    render_current_volume(fingerprint)
+    else:
+        render_current_volume(fingerprint)
+
+    show_segmentation_benchmarks("ct-results-metrics")
 
 
 def render_current_volume(active_id):
@@ -162,10 +166,16 @@ def render_current_volume(active_id):
                         st.caption(f"Unmasked input · Slice {index + 1} / {count}")
                     else:
                         st.caption(f"{np.count_nonzero(overlay):,} marked pixels on this slice")
-            if reference is not None and prediction is not None:
-                total = int(reference.sum() + prediction.sum())
-                dice = f"{2 * np.count_nonzero(reference & prediction) / total:.3f}" if total else "Undefined"
-                st.metric("Selected volume Dice", dice)
+            if prediction is not None:
+                predicted_count = int(np.count_nonzero(prediction))
+                model_count, match = st.columns(2)
+                model_count.metric("Model-marked voxels · full volume", f"{predicted_count:,}")
+                if reference is not None:
+                    total = int(reference.sum()) + predicted_count
+                    dice = f"{2 * np.count_nonzero(reference & prediction) / total:.3f}" if total else "Undefined"
+                    match.metric("Dice · current volume", dice)
+                else:
+                    match.caption("Add an aligned reference mask to calculate Dice for this upload.")
 
 
 def volume_prediction():
@@ -231,6 +241,7 @@ def volume_prediction():
                 st.error(f"Unable to generate an overlay. {error}")
         if not ready:
             st.caption("The segmentation checkpoint is unavailable.")
+        output_metrics = st.container()
         if prediction is not None:
             show_overlay, opacity = viewer_overlay("Model overlay", "volume")
             if not prediction.any():
@@ -245,14 +256,19 @@ def volume_prediction():
         initial = values.shape[axis] // 2
         index = viewer_slice_index(plane, values.shape[axis], initial, fingerprint)
         section = volume_section(values, axis, index)
-        overlay = volume_section(prediction, axis, index) if show_overlay else None
+        predicted_slice = volume_section(prediction, axis, index) if prediction is not None else None
+        overlay = predicted_slice if show_overlay else None
         rendered = render_slice(section, center, width, mask=overlay, opacity=opacity)
         height, columns = section.shape
         x_axis, y_axis = ((1, 2), (0, 2), (0, 1))[axis]
         ratio = columns * spacing[x_axis] / (height * spacing[y_axis]) if spacing[y_axis] > 0 else None
         preview.image(viewer_image(rendered, ratio), width="stretch")
         if overlay is not None:
-            st.caption(f"Cyan shows the model output · {np.count_nonzero(overlay):,} marked pixels on this slice.")
+            st.caption("Cyan shows the model output.")
+    if predicted_slice is not None:
+        with output_metrics:
+            st.metric("Model-marked pixels · selected slice", f"{np.count_nonzero(predicted_slice):,}")
+            st.metric("Model-marked voxels · full volume", f"{np.count_nonzero(prediction):,}")
 
 
 def viewer_window(key):
@@ -348,7 +364,7 @@ def upload_scan():
 
     if volume is not None or dicom is not None:
         for key in ("active_scan", "viewer_volume", "analysis_scan", "analysis_volume",
-                    "analysis_scores", "volume_prediction"):
+                    "analysis_scores", "classifier_error", "volume_prediction"):
             st.session_state.pop(key, None)
         if volume is not None:
             if not volume.name.lower().endswith((".nii", ".nii.gz")):
@@ -451,17 +467,25 @@ def analysis():
         saved_id, scores = st.session_state.get("analysis_scores", (None, None))
         if saved_id != scan_id:
             scores = None
-        if st.button("Run research classifier", type="primary"):
+        failed_id, failure = st.session_state.get("classifier_error", (None, None))
+        if failed_id != scan_id:
+            failure = None
+        retry = st.button("Retry research classifier") if failure is not None else False
+        if scores is None and (failure is None or retry):
             try:
                 from research_model import load_model, score_slice
 
-                if not checkpoint.is_file():
-                    st.info("Add the trained checkpoint at models/ct-spatial-cnn.pt.")
-                else:
+                with st.spinner("Running the research classifier"):
                     scores = score_slice(load_model(checkpoint), contents)
-                    st.session_state["analysis_scores"] = (scan_id, scores)
+                st.session_state["analysis_scores"] = (scan_id, scores)
+                st.session_state.pop("classifier_error", None)
+                failure = None
             except (ImportError, OSError, ValueError, RuntimeError, KeyError) as error:
-                st.error(f"Classifier unavailable. {error}")
+                failure = str(error)
+                st.session_state["classifier_error"] = (scan_id, failure)
+                st.rerun()
+        if failure is not None:
+            st.error(f"Classifier unavailable. {failure}")
         if scores is not None:
             show_classifier_scores(scores)
     with image_panel, st.container(border=True, key="ct-viewer-stage"):

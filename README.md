@@ -122,8 +122,7 @@ single-slice checkpoint.
 Open **Upload** and select a de-identified 3D head CT in NIfTI format
 (`.nii` or `.nii.gz`). The Scan Viewer and Model Results links appear after
 the upload opens successfully. Click **Generate experimental overlay** to
-compute a mask for the current scan. With a DICOM slice, use **Run research
-classifier** to compute slice-level scores instead.
+compute a mask for the current scan. For a DICOM slice, the viewer runs the classifier when the slice opens.
 
 ### Review model overlays
 
