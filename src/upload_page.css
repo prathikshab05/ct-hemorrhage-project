@@ -1,0 +1,51 @@
+/* Upload page layout and native drop targets. */
+.stApp:has(.ct-upload-intro) { background: #19232d; color: #f0f4f5; }
+.stApp:has(.ct-upload-intro) [data-testid="stHeader"] { display: none; }
+.stApp:has(.ct-upload-intro) .block-container {
+  max-width: 1080px;
+  padding: 0 clamp(18px,4vw,52px) 32px;
+  font-family: "Segoe UI",system-ui,sans-serif;
+}
+.ct-upload-rail {
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 58px; gap: 16px; border-bottom: 1px solid #425361;
+  font-size: .72rem; letter-spacing: .11em; color: #adbfc9;
+}
+.ct-upload-rail a { color: #eaf2f4; text-decoration: none; }
+.ct-upload-intro { text-align: center; padding: clamp(20px,5vh,55px) 0 12px; }
+.ct-upload-intro h1 {
+  font: 450 clamp(1.75rem,4vw,3.2rem)/1.08 "Segoe UI",system-ui,sans-serif;
+  letter-spacing: -.035em; color: #f0f4f5; padding: 0;
+}
+.ct-upload-intro p,.ct-upload-teaching p { margin: 8px 0 0; color: #c3d0d7; }
+.st-key-ct-upload-panel {
+  padding: clamp(12px,2vw,24px); border: 1px solid #526575; border-radius: 8px;
+  background: #202d38;
+}
+.ct-upload-option { padding: 6px 4px 0; }
+.ct-upload-option h2 { font-size: 1.28rem; color: #a6e5e0; padding: 0; }
+.ct-upload-option p { color: #d6e1e7; margin: 5px 0 0; }
+.ct-upload-option .ct-upload-format { font-size: .83rem; color: #aebfc9; }
+.st-key-ct-upload-panel [data-testid="stFileUploaderDropzone"] {
+  min-height: 122px; border: 1px dashed #73909d; border-radius: 5px; background: #18252f;
+}
+.st-key-ct-upload-panel [data-testid="stFileUploaderDropzone"] button,
+.st-key-ct-upload-teaching [data-testid="stButton"] button {
+  background: #27444d; border: 1px solid #779f9f; color: #f0f7f8; border-radius: 5px;
+}
+.st-key-ct-upload-panel [data-testid="stFileUploaderDropzone"] button:hover,
+.st-key-ct-upload-teaching [data-testid="stButton"] button:hover { background: #335761; }
+.st-key-ct-upload-panel button:focus-visible,
+.st-key-ct-upload-teaching button:focus-visible,.ct-upload-rail a:focus-visible {
+  outline: 2px solid #a6e5e0; outline-offset: 3px;
+}
+.st-key-ct-upload-teaching { max-width: 580px; margin: 0 auto; text-align: center; padding-top: 8px; }
+.ct-upload-teaching h2 { font-size: 1.2rem; padding: 0; }
+.ct-upload-foot {
+  margin: 15px 0 0; padding: 14px 0 0; border-top: 1px solid #425361;
+  text-align: center; font-size: .81rem; color: #c0cdd5;
+}
+@media(max-width: 640px) {
+  .st-key-ct-upload-panel [data-testid="stHorizontalBlock"] { flex-direction: column; }
+  .st-key-ct-upload-panel [data-testid="stColumn"] { width: 100%; flex: 1 1 auto; }
+}

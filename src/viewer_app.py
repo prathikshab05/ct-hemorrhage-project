@@ -301,23 +301,31 @@ def model_review():
 def volume_prediction():
     st.subheader("Predict on a CT volume")
     st.caption("Use a de-identified axial head CT in NIfTI format. Experimental research output.")
-    upload = st.file_uploader("Research CT volume (.nii or .nii.gz)", type=["nii", "gz"])
+    selected_volume = st.session_state.get("analysis_volume")
+    upload = None
+    if selected_volume is None:
+        upload = st.file_uploader("Research CT volume (.nii or .nii.gz)", type=["nii", "gz"])
+    else:
+        st.caption(f"Selected file: {selected_volume[0]}")
     project = Path(__file__).resolve().parents[1]
     example = project / "data" / "model-review" / "strong" / "scan.nii.gz"
-    use_example = upload is None and st.toggle(
+    use_example = selected_volume is None and upload is None and st.toggle(
         "Use the BHSD research example", disabled=not example.is_file(),
     )
     checkpoint = project / "models" / "ct-segmenter-balanced-expanded.pt"
     if not checkpoint.is_file():
         checkpoint = project / "assets" / "checkpoints" / checkpoint.name
-    if upload is None and not use_example:
+    if selected_volume is None and upload is None and not use_example:
         st.session_state.pop("volume_prediction", None)
         return
     if not checkpoint.is_file():
         st.info("Add the trained segmentation checkpoint to the models folder.")
         return
 
-    contents = example.read_bytes() if use_example else upload.getvalue()
+    if selected_volume is not None:
+        contents = selected_volume[1]
+    else:
+        contents = example.read_bytes() if use_example else upload.getvalue()
     scan_id = (hashlib.sha256(contents).hexdigest(), checkpoint.stat().st_mtime_ns)
     saved_id, result = st.session_state.get("volume_prediction", (None, None))
     if saved_id != scan_id:
@@ -375,7 +383,79 @@ def volume_prediction():
 def landing():
     from title_page import title_page
 
-    title_page(home_page)
+    title_page(upload_page)
+
+
+def upload_scan():
+    from title_page import workspace_entry
+
+    workspace_entry()
+    st.html(Path(__file__).with_name("upload_page.css"))
+    st.html("""
+        <div class="ct-upload-rail">
+            <a href="./">CT HEMORRHAGE</a>
+            <span>SCIENTIFIC PROTOTYPE</span>
+        </div>
+        <header class="ct-upload-intro">
+            <h1>Upload a scan for analysis</h1>
+            <p>Choose a CT volume or a single DICOM slice to open the scan viewer.</p>
+        </header>
+    """)
+    with st.container(key="ct-upload-panel"):
+        volume_col, dicom_col = st.columns(2, gap="large")
+        with volume_col:
+            st.html("""
+                <div class="ct-upload-option">
+                    <h2>CT volume</h2>
+                    <p class="ct-upload-format">3D NIfTI · .nii or .nii.gz</p>
+                    <p>Generate an experimental hemorrhage overlay for each axial slice.</p>
+                </div>
+            """)
+            volume = st.file_uploader("Upload a CT volume", type=["nii", "gz"], key="upload-volume")
+        with dicom_col:
+            st.html("""
+                <div class="ct-upload-option">
+                    <h2>DICOM slice</h2>
+                    <p class="ct-upload-format">Single CT image · .dcm</p>
+                    <p>Run the research classifier to view hemorrhage subtype scores.</p>
+                </div>
+            """)
+            dicom = st.file_uploader("Upload a DICOM slice", type=["dcm"], key="upload-dicom")
+
+    if volume is not None and not volume.name.lower().endswith((".nii", ".nii.gz")):
+        st.error("Choose a NIfTI volume ending in .nii or .nii.gz.")
+        volume = None
+    if volume is not None:
+        st.session_state.pop("analysis_scan", None)
+        st.session_state["analysis_volume"] = (volume.name, volume.getvalue())
+        st.session_state["analysis_source"] = "volume-prediction"
+        st.switch_page(analysis_page)
+    if dicom is not None:
+        st.session_state.pop("analysis_volume", None)
+        st.session_state.pop("volume_prediction", None)
+        st.session_state["analysis_scan"] = (dicom.name, dicom.getvalue())
+        st.session_state["analysis_source"] = "slice"
+        st.switch_page(analysis_page)
+
+    with st.container(key="ct-upload-teaching"):
+        st.html("""
+            <div class="ct-upload-teaching">
+                <h2>No scan on hand?</h2>
+                <p>View a published head CT teaching image.</p>
+            </div>
+        """)
+        if st.button("Open teaching scan"):
+            for key in ("analysis_scan", "analysis_volume", "volume_prediction"):
+                st.session_state.pop(key, None)
+            st.session_state["analysis_source"] = "slice"
+            st.switch_page(analysis_page)
+        st.page_link(home_page, label="Explore the research workspace")
+    st.html("""
+        <p class="ct-upload-foot">
+            Use de-identified research scans only. The hosted app processes uploads on its server.
+            Scientific prototype. Not for diagnostic purposes.
+        </p>
+    """)
 
 
 def home():
@@ -384,6 +464,7 @@ def home():
 
     workspace_entry()
     st.page_link(landing_page, label="Back to title", icon=":material/arrow_back:")
+    st.page_link(upload_page, label="Upload a scan")
     dashboard_header()
     main_panel, hologram, preview = st.columns([1, 2.65, 1.2], gap="medium")
     with main_panel, st.container(border=True):
@@ -399,6 +480,7 @@ def home():
             st.session_state.pop("analysis_scan", None)
             st.switch_page(analysis_page)
         if st.button("Predict on a CT volume"):
+            st.session_state.pop("analysis_volume", None)
             st.session_state["analysis_source"] = "volume-prediction"
             st.switch_page(analysis_page)
         if st.button("Review model results"):
@@ -419,7 +501,8 @@ def analysis():
     from dashboard import dashboard_header, scan_montage, scan_workspace_style
 
     dashboard_header()
-    st.page_link(home_page, label="Back to dashboard", icon=":material/arrow_back:")
+    st.page_link(upload_page, label="Back to upload", icon=":material/arrow_back:")
+    st.page_link(home_page, label="Research workspace")
     scan_workspace_style()
     if st.session_state.get("analysis_source") == "volume-prediction":
         volume_prediction()
@@ -483,6 +566,7 @@ def analysis():
         with st.expander("Add a region overlay", expanded=True):
             st.caption("Load the mask for this exact slice, or open the volume predictor for a full CT.")
             if st.button("Open volume predictor"):
+                st.session_state.pop("analysis_volume", None)
                 st.session_state["analysis_source"] = "volume-prediction"
                 st.rerun()
             annotation = st.file_uploader("Aligned binary mask (.npy)", type=["npy"], key=f"mask-{scan_id}")
@@ -546,12 +630,13 @@ def analysis():
 
 
 def main():
-    global landing_page, home_page, analysis_page
+    global landing_page, upload_page, home_page, analysis_page
     st.set_page_config(page_title="CT Slice Lab", layout="wide")
     landing_page = st.Page(landing, title="CT Hemorrhage", default=True)
+    upload_page = st.Page(upload_scan, title="Upload a scan", url_path="upload")
     home_page = st.Page(home, title="Research workspace", url_path="workspace")
     analysis_page = st.Page(analysis, title="Scan analysis", url_path="analysis")
-    st.navigation([landing_page, home_page, analysis_page], position="hidden").run()
+    st.navigation([landing_page, upload_page, home_page, analysis_page], position="hidden").run()
 
 
 def png_bytes(image):
