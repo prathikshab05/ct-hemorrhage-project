@@ -9,7 +9,7 @@ import torch
 from nibabel.orientations import apply_orientation, io_orientation, ornt_transform
 from torch import nn
 
-from train_segmentation import Segmenter, prepare_slices
+from train_segmentation import SEGMENTERS, prepare_slices
 
 
 @torch.inference_mode()
@@ -19,7 +19,10 @@ def predict_mask(scan, checkpoint):
     input_channels = saved.get("input_channels", 1)
     if saved["input_size"] != 128 or input_channels not in (1, 3) or not 0 < threshold < 1:
         raise ValueError("Unsupported segmentation checkpoint settings.")
-    model = Segmenter(input_channels)
+    architecture = saved.get("architecture", "baseline")
+    if architecture not in SEGMENTERS:
+        raise ValueError("Unsupported segmentation architecture.")
+    model = SEGMENTERS[architecture](input_channels)
     model.load_state_dict(saved["weights"])
     model.eval()
     canonical = nib.as_closest_canonical(scan)

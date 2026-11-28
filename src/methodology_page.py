@@ -23,7 +23,7 @@ def methodology_page():
     heading, link = st.columns([3, 1], vertical_alignment="center")
     heading.title("Methodology")
     link.link_button("View source on GitHub", REPOSITORY, icon=":material/code:")
-    st.caption("Research prototype. Not for diagnostic purposes. The GitHub repository requires authorized access.")
+    st.caption("Research prototype. Not for diagnostic purposes.")
 
     with st.container(key="ct-method-grid"):
         sources, training, limits = st.columns(3, gap="medium")
@@ -69,7 +69,7 @@ def methodology_page():
         st.markdown(
             f"- [Segmentation trainer]({REPOSITORY}/blob/main/src/train_segmentation.py)\n"
             f"- [Native-grid evaluator]({REPOSITORY}/blob/main/src/evaluate_segmentation.py)\n"
-            f"- [Reproduction steps and experiment notes]({REPOSITORY}#bhsd-segmentation-experiment)"
+            f"- [Reproduction steps and experiment notes]({REPOSITORY}#segmentation-evaluation)"
         )
 
 

@@ -29,6 +29,41 @@ class Segmenter(nn.Module):
         return self.output(torch.cat((detail, context), dim=1))
 
 
+class ContextUNet(nn.Module):
+    """Compact encoder-decoder for the center slice of a three-slice stack."""
+
+    def __init__(self, input_channels):
+        super().__init__()
+
+        def block(inputs, outputs):
+            return nn.Sequential(
+                nn.Conv2d(inputs, outputs, 3, padding=1, bias=False),
+                nn.BatchNorm2d(outputs), nn.ReLU(inplace=True),
+                nn.Conv2d(outputs, outputs, 3, padding=1, bias=False),
+                nn.BatchNorm2d(outputs), nn.ReLU(inplace=True),
+            )
+
+        self.down = nn.ModuleList([block(input_channels, 8), block(8, 16), block(16, 32)])
+        self.bridge = block(32, 48)
+        self.up = nn.ModuleList([block(80, 32), block(48, 16), block(24, 8)])
+        self.head = nn.Conv2d(8, 1, 1)
+
+    def forward(self, x):
+        skips = []
+        for layer in self.down:
+            x = layer(x)
+            skips.append(x)
+            x = nn.functional.max_pool2d(x, 2)
+        x = self.bridge(x)
+        for layer, skip in zip(self.up, reversed(skips)):
+            x = nn.functional.interpolate(x, size=skip.shape[-2:], mode="bilinear", align_corners=False)
+            x = layer(torch.cat((x, skip), dim=1))
+        return self.head(x)
+
+
+SEGMENTERS = {"baseline": Segmenter, "context-unet": ContextUNet}
+
+
 def prepare_slices(values, input_channels=1):
     if values.ndim != 3 or not np.isfinite(values).all():
         raise ValueError("Expected a 3D CT volume with finite intensities.")
@@ -42,7 +77,7 @@ def prepare_slices(values, input_channels=1):
     return images
 
 
-def read_case(scan_path, mask_path, input_channels=1):
+def read_case(scan_path, mask_path, input_channels=1, mask_resize="nearest"):
     scan, mask = map(lambda p: nib.as_closest_canonical(nib.load(p)), (scan_path, mask_path))
     if len(scan.shape) != 3 or scan.shape != mask.shape or not np.allclose(scan.affine, mask.affine, atol=0.01):
         raise ValueError(f"Scan and mask must share a 3D grid: {scan_path}")
@@ -54,7 +89,7 @@ def read_case(scan_path, mask_path, input_channels=1):
     labels = torch.from_numpy(marked.transpose(2, 1, 0).copy())[:, None]
     return (
         prepare_slices(values, input_channels),
-        nn.functional.interpolate(labels, (128, 128), mode="nearest"),
+        nn.functional.interpolate(labels, (128, 128), mode=mask_resize),
     )
 
 
@@ -65,8 +100,9 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("models/ct-segmenter.pt"))
     parser.add_argument("--neighboring-slices", action="store_true",
                         help="Use the previous and next axial slices as additional inputs.")
+    parser.add_argument("--architecture", choices=SEGMENTERS, default="baseline")
     args = parser.parse_args()
-    input_channels = 3 if args.neighboring_slices else 1
+    input_channels = 3 if args.neighboring_slices or args.architecture == "context-unet" else 1
     if args.epochs < 1:
         parser.error("Epochs must be positive.")
     with args.manifest.open(newline="", encoding="utf-8-sig") as source:
@@ -80,13 +116,14 @@ def main():
     if len(set(patients)) < 5:
         parser.error("Provide at least five distinct patients for a training and validation split.")
     train, validation = next(GroupShuffleSplit(test_size=.2, random_state=26).split(rows, groups=patients))
-    cases = [read_case(*pair, input_channels) for pair in paths]
+    mask_resize = "nearest-exact" if args.architecture == "context-unet" else "nearest"
+    cases = [read_case(*pair, input_channels, mask_resize) for pair in paths]
     images, labels = (torch.cat([cases[i][j] for i in train]) for j in (0, 1))
     if not labels.any() or not any(cases[i][1].any() for i in validation):
         parser.error("Both splits need examples with marked pixels.")
     torch.manual_seed(26)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = Segmenter(input_channels).to(device)
+    model = SEGMENTERS[args.architecture](input_channels).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     marked = labels.flatten(1).any(dim=1)
     marked_count = int(marked.sum())
@@ -113,6 +150,8 @@ def main():
         model.train()
         for x, y in loader:
             x, y = x.to(device), y.to(device)
+            if args.architecture == "context-unet" and torch.rand(()) < 0.5:
+                x, y = x.flip(-1), y.flip(-1)
             optimizer.zero_grad()
             logits = model(x)
             p = logits.sigmoid()
@@ -156,6 +195,7 @@ def main():
     print(f"Selected threshold {selected:.2f} using validation volumes", flush=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     torch.save({
+        "architecture": args.architecture,
         "weights": model.cpu().state_dict(),
         "input_size": 128,
         "input_channels": input_channels,
