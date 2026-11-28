@@ -123,7 +123,8 @@ def main():
         parser.error("Both splits need examples with marked pixels.")
     torch.manual_seed(26)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = SEGMENTERS[args.architecture](input_channels).to(device)
+    memory_format = torch.channels_last if args.architecture == "context-unet" else torch.contiguous_format
+    model = SEGMENTERS[args.architecture](input_channels).to(device, memory_format=memory_format)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     marked = labels.flatten(1).any(dim=1)
     marked_count = int(marked.sum())
@@ -153,7 +154,7 @@ def main():
             if args.architecture == "context-unet" and torch.rand(()) < 0.5:
                 x, y = x.flip(-1), y.flip(-1)
             optimizer.zero_grad()
-            logits = model(x)
+            logits = model(x.contiguous(memory_format=memory_format))
             p = logits.sigmoid()
             dice_loss = 1 - (2 * (p * y).sum() + 1) / (p.sum() + y.sum() + 1)
             pixel_loss = nn.functional.binary_cross_entropy_with_logits(
@@ -172,7 +173,7 @@ def main():
             x, target = cases[i]
             target = target.bool()
             target_count = int(target.sum())
-            scores = torch.cat([model(batch.to(device)).sigmoid().cpu() for batch in x.split(16)])
+            scores = torch.cat([model(batch.to(device, memory_format=memory_format)).sigmoid().cpu() for batch in x.split(16)])
             for threshold in thresholds:
                 pred = scores >= threshold
                 if target_count:

@@ -59,18 +59,18 @@ def title_page(workspace_page):
             <article>
               <h2>Dataset</h2>
               <p class="ct-title-fact">BHSD + RSNA</p>
-              <p><a href="https://huggingface.co/datasets/Wendy-Fly/BHSD">BHSD</a> supplied 40 annotated volumes for the segmentation experiment.
+              <p><a href="https://huggingface.co/datasets/Wendy-Fly/BHSD">BHSD</a> supplied 94 annotated volumes for the segmentation experiment.
                 <a href="https://www.kaggle.com/competitions/rsna-intracranial-hemorrhage-detection">RSNA</a> supplied labeled slices for the separate classifier.</p>
             </article>
             <article>
               <h2>Model architecture</h2>
-              <p class="ct-title-fact">2D convolutional network</p>
-              <p>The segmentation model combines fine-detail and pooled features to produce one binary mask per axial slice.</p>
+              <p class="ct-title-fact">2D U-Net with adjacent slices</p>
+              <p>The segmentation model uses three neighboring axial slices to predict a binary mask for the center slice.</p>
             </article>
             <article>
               <h2>Validation metrics</h2>
-              <p class="ct-title-fact">0.354 mean Dice</p>
-              <p>Mask overlap on eight held-out BHSD scans, all with annotated hemorrhage. Performance on bleed-negative scans is unmeasured.</p>
+              <p class="ct-title-fact">0.495 mean Dice</p>
+              <p>Mean overlap on the original eight held-out BHSD scans. On 12 fresh holdouts, mean Dice was 0.351.</p>
             </article>
           </section>
         </div>

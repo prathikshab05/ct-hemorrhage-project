@@ -184,7 +184,7 @@ def volume_prediction():
     name, contents = st.session_state["analysis_volume"]
     st.text(name)
     project = Path(__file__).resolve().parents[1]
-    checkpoint = project / "models" / "ct-segmenter-balanced-expanded.pt"
+    checkpoint = project / "models" / "ct-segmenter-context-expanded.pt"
     if not checkpoint.is_file():
         checkpoint = project / "assets" / "checkpoints" / checkpoint.name
 

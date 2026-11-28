@@ -31,7 +31,7 @@ py -3.12 -m venv .venv
 ```
 
 Open [localhost:8503](http://localhost:8503/). The package list includes CPU
-PyTorch and both demo checkpoints are bundled under `assets/checkpoints/`.
+PyTorch and demo checkpoints are bundled under `assets/checkpoints/`.
 For Streamlit Community Cloud use branch `main`, entry point `src/viewer_app.py`,
 and Python 3.12.
 
@@ -40,10 +40,10 @@ and Python 3.12.
 - **Classification:** The bundled spatial CNN uses three CT contrast windows
   as input and returns six uncalibrated scores. It was trained on a subset
   of the [RSNA intracranial hemorrhage dataset](https://www.kaggle.com/competitions/rsna-intracranial-hemorrhage-detection).
-- **Segmentation:** The original deployment used a small 2D CNN trained with
-  binary masks from the [Brain Hemorrhage Segmentation Dataset](https://huggingface.co/datasets/Wendy-Fly/BHSD).
-  Its expanded run used 25 training volumes, 7 validation volumes for cutoff
-  selection, and 8 held-out test volumes. The masks combine hemorrhage subtypes
+- **Segmentation:** The deployed 2D U-Net predicts the center axial slice
+  from a stack of three. The [Brain Hemorrhage Segmentation Dataset](https://huggingface.co/datasets/Wendy-Fly/BHSD)
+  supplied 94 scan and mask pairs: 59 training volumes, 15 for threshold
+  selection, and 20 test volumes. Reference masks combine hemorrhage subtypes
   into one foreground label.
 - **Teaching image:** The multiplanar preview is adapted from
   [Spahr et al., Figure 1B](https://doi.org/10.3389/fnimg.2023.1157565)
@@ -51,18 +51,24 @@ and Python 3.12.
 
 ## Segmentation evaluation
 
-| Experiment | Training volumes | Mean Dice on eight held-out volumes |
-| --- | ---: | ---: |
-| Balanced pilot | 8 | 0.179 |
-| Expanded single-slice CNN | 25 | 0.354 |
-| Expanded CNN with adjacent slices | 25 | 0.359 |
+| Experiment | Training volumes | Original holdout (8) | Fresh holdout (12) |
+| --- | ---: | ---: | ---: |
+| Balanced pilot | 8 | 0.179 | — |
+| Previous deployed CNN | 25 | 0.354 | 0.267 |
+| CNN with adjacent slices | 25 | 0.359 | — |
+| Context U-Net, small split | 25 | 0.311 | — |
+| **Context U-Net, expanded split** | **59** | **0.495** | **0.351** |
 
 Dice measures overlap with the reference mask, from 0 for no overlap to 1
-for identical nonempty masks. The original deployed model averaged **40.9%
-voxel precision** and **39.4% voxel recall** on the original CT grid. The
-same eight hemorrhage-positive volumes were used for these comparisons.
-The split uses archive identifiers because patient-level identity could not
-be independently verified. The cohort cannot establish scan-level specificity
+for identical nonempty masks. The expanded U-Net averaged 67.1% voxel
+precision and 45.3% voxel recall on the original holdout, and 53.3% precision
+and 33.1% recall on the fresh holdout. Metrics are averaged per volume on
+its native CT grid. The new model trained for eight epochs; its 0.80 cutoff
+was selected on validation data before evaluating either holdout.
+
+Both holdouts contain hemorrhage-positive BHSD volumes. They are separate
+by archive identifier, but patient identity could not be independently
+verified. These results do not establish specificity on bleed-negative scans
 or performance across hospitals. The app is for research and education only.
 
 ## Train and evaluate a model
@@ -74,9 +80,9 @@ patient identifier for every scan belonging to that patient and keep the
 test manifest separate from training and cutoff selection.
 
 ```powershell
-.\.venv\Scripts\python.exe src\train_segmentation.py data\development.csv --architecture context-unet --epochs 14 --output models\ct-segmenter-context-unet.pt
-.\.venv\Scripts\python.exe src\evaluate_segmentation.py data\held-out.csv --checkpoint models\ct-segmenter-context-unet.pt
-.\.venv\Scripts\python.exe src\predict_segmentation.py data\scan.nii.gz outputs\prediction.nii.gz --checkpoint models\ct-segmenter-context-unet.pt
+.\.venv\Scripts\python.exe src\train_segmentation.py data\development.csv --architecture context-unet --epochs 8 --output models\ct-segmenter-context-expanded.pt
+.\.venv\Scripts\python.exe src\evaluate_segmentation.py data\held-out.csv --checkpoint models\ct-segmenter-context-expanded.pt
+.\.venv\Scripts\python.exe src\predict_segmentation.py data\scan.nii.gz outputs\prediction.nii.gz --checkpoint models\ct-segmenter-context-expanded.pt
 ```
 
 The context U-Net predicts the center slice from three adjacent axial

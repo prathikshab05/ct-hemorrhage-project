@@ -22,7 +22,8 @@ def predict_mask(scan, checkpoint):
     architecture = saved.get("architecture", "baseline")
     if architecture not in SEGMENTERS:
         raise ValueError("Unsupported segmentation architecture.")
-    model = SEGMENTERS[architecture](input_channels)
+    memory_format = torch.channels_last if architecture == "context-unet" else torch.contiguous_format
+    model = SEGMENTERS[architecture](input_channels).to(memory_format=memory_format)
     model.load_state_dict(saved["weights"])
     model.eval()
     canonical = nib.as_closest_canonical(scan)
@@ -33,7 +34,7 @@ def predict_mask(scan, checkpoint):
     frames = []
     for batch in slices.split(8):
         scores = nn.functional.interpolate(
-            model(batch).sigmoid(), size=(values.shape[1], values.shape[0]),
+            model(batch.contiguous(memory_format=memory_format)).sigmoid(), size=(values.shape[1], values.shape[0]),
             mode="bilinear", align_corners=False,
         )
         frames.append((scores[:, 0] >= threshold).numpy())

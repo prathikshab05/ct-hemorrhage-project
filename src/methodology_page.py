@@ -42,19 +42,20 @@ def methodology_page():
         with training, st.container(border=True):
             st.subheader("Training and validation")
             st.markdown(
-                "**2D CNN** · axial CT slice → pixel scores → binary mask. "
-                "The expanded run used 25 volumes for training, 7 for threshold selection, and 8 for testing."
+                "**2D U-Net** · three adjacent axial slices → center-slice mask. "
+                "The expanded run used 59 volumes for training, 15 for threshold selection, "
+                "and two holdouts of 8 and 12 volumes."
             )
             with st.expander("Training and split details"):
                 st.write(
-                    "The model trained for eight epochs with AdamW and a combined weighted binary cross-entropy "
+                    "The model trained for eight epochs with AdamW, horizontal flips, and a combined weighted binary cross-entropy "
                     "and Dice loss. Hemorrhage subtypes share one foreground label. Archive identifiers were used "
                     "for grouping because distinct patient identities could not be verified."
                 )
         with limits, st.container(border=True):
             st.subheader("Current limitations")
             st.markdown(
-                "Overlap varied substantially across the eight test volumes. All contained annotated hemorrhage, "
+                "Overlap varied substantially across both test sets. All contained annotated hemorrhage, "
                 "so scan-level specificity was unmeasured."
             )
             with st.expander("What the evaluation can tell us"):
@@ -77,10 +78,11 @@ def show_segmentation_benchmarks(key):
     with st.container(border=True, key=key):
         st.subheader("Held-out segmentation results")
         dice, precision, recall = st.columns(3)
-        dice.metric("Mean Dice", "0.354")
-        precision.metric("Mean voxel precision", "40.9%")
-        recall.metric("Mean voxel recall", "39.4%")
+        dice.metric("Mean Dice", "0.495")
+        precision.metric("Mean voxel precision", "67.1%")
+        recall.metric("Mean voxel recall", "45.3%")
         st.caption(
-            "Benchmarks from eight held-out BHSD volumes with annotated hemorrhage. "
-            "Individual Dice scores ranged from 0.002 to 0.790. Scan-level specificity was not measured."
+            "Original holdout · 8 BHSD volumes. The previous model scored 0.354 mean Dice."
         )
+        st.caption("Fresh holdout · 12 BHSD volumes. Mean Dice rose from 0.267 to 0.351. "
+                   "Both cohorts contained only scans with annotated hemorrhage.")
